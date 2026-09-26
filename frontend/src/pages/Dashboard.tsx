@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
 import type { ProjectSummary } from '../api/types'
 import { Logo } from '../components/Logo'
+import { ApiImg } from '../lib/apiImage'
 import { toast } from '../components/toast'
 import { Button, Field, inputClass, Modal, ProgressBar, Spinner } from '../components/ui'
 import { formatDuration, formatRelative } from '../lib/format'
@@ -169,10 +170,10 @@ function ProjectCard({
     <div className="group relative flex flex-col overflow-hidden rounded-xl border border-line bg-panel transition-colors duration-150 hover:border-line-strong">
       <button onClick={onOpen} className="relative block aspect-video overflow-hidden bg-bg" aria-label={`Open ${project.name}`}>
         {thumbOk ? (
-          <img
-            src={api.thumbnailUrl(project.id, bust)}
+          <ApiImg
+            url={api.thumbnailUrl(project.id, bust)}
             alt=""
-            onError={() => setThumbOk(false)}
+            onFailed={() => setThumbOk(false)}
             className="h-full w-full object-contain transition-transform duration-300 group-hover:scale-[1.02]"
           />
         ) : (

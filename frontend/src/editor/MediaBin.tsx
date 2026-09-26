@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { Asset } from '../api/types'
 import { toast } from '../components/toast'
+import { ApiImg } from '../lib/apiImage'
 import { Button, IconButton, Modal, ProgressBar, Spinner } from '../components/ui'
 import { formatBytes, formatDuration, uid } from '../lib/format'
 import { useEditor } from './store'
@@ -197,7 +198,7 @@ function AssetCard({ projectId, asset, onAdded }: { projectId: string; asset: As
     >
       <div className="relative aspect-video bg-bg">
         {hasPoster ? (
-          <img src={api.posterUrl(projectId, asset.id)} alt="" draggable={false} className="h-full w-full object-cover" />
+          <ApiImg url={api.posterUrl(projectId, asset.id)} alt="" draggable={false} className="h-full w-full object-cover" />
         ) : (
           <div className="flex h-full items-center justify-center text-faint">
             {asset.status === 'processing' ? (

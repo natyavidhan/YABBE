@@ -23,6 +23,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { Asset, Clip, Track } from '../api/types'
 import { toast } from '../components/toast'
+import { ApiImg, useApiImage } from '../lib/apiImage'
 import { Button, IconButton, Modal, inputClass } from '../components/ui'
 import { clamp } from '../lib/format'
 import { isTouchEvent, useIsMobile } from '../lib/useMedia'
@@ -971,7 +972,9 @@ function TransitionHoverCard({ kind, name, duration, anchor }: { kind: string; n
       className="toast-in pointer-events-none fixed z-50 overflow-hidden rounded-lg border border-line-strong bg-raised shadow-2xl shadow-black/60"
       style={{ left, bottom: window.innerHeight - anchor.top + 8, width: W }}
     >
-      <img src={api.transitionPreviewUrl(kind)} alt="" className="aspect-video w-full bg-bg object-cover" />
+      <div className="aspect-video w-full bg-bg">
+        <ApiImg url={api.transitionPreviewUrl(kind)} alt="" className="h-full w-full object-cover" />
+      </div>
       <div className="flex items-center justify-between px-2 py-1 text-[11px]">
         <span className="font-medium">{name}</span>
         <span className="text-muted">{duration.toFixed(2)} s</span>
@@ -1120,7 +1123,8 @@ function Filmstrip({
   const aspect = asset.width && asset.height ? asset.width / asset.height : 16 / 9
   const tileW = Math.max(8, height * aspect)
   const count = Math.min(300, Math.ceil(width / tileW))
-  const url = api.filmstripUrl(projectId, asset.id)
+  // Loaded via fetch -> blob URL (see lib/apiImage for why).
+  const url = useApiImage(api.filmstripUrl(projectId, asset.id)).src
   const tiles = []
   for (let i = 0; i < count; i++) {
     let idx = 0
@@ -1134,7 +1138,7 @@ function Filmstrip({
         className="h-full shrink-0"
         style={{
           width: tileW,
-          backgroundImage: `url(${url})`,
+          backgroundImage: url ? `url(${url})` : undefined,
           backgroundSize: `${tileW * asset.thumb_count}px ${height}px`,
           backgroundPosition: `${-idx * tileW}px 0`,
         }}

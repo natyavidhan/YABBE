@@ -1,5 +1,6 @@
 import { ArrowRightLeft, CopyCheck, Trash2 } from 'lucide-react'
 import { useState } from 'react'
+import { ApiImg } from '../lib/apiImage'
 import { useMediaQuery } from '../lib/useMedia'
 import { api } from '../api/client'
 import { toast } from '../components/toast'
@@ -176,32 +177,20 @@ export function TransitionPanel({ clipId }: { clipId: string }) {
   )
 }
 
-/** Image that fills its tile, retrying a couple of times and never showing a blank box. */
+/** Image that fills its tile (loaded via fetch; see lib/apiImage) with a visible failure state. */
 function PreviewImage({ src }: { src: string }) {
-  const [attempt, setAttempt] = useState(0)
-  const [failed, setFailed] = useState(false)
-  if (failed)
-    return (
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation()
-          setFailed(false)
-          setAttempt((a) => a + 1)
-        }}
-        className="absolute inset-0 flex items-center justify-center text-[10px] text-muted"
-      >
-        Preview unavailable — tap to retry
-      </button>
-    )
   return (
-    <img
-      src={attempt ? `${src}&retry=${attempt}` : src}
+    <ApiImg
+      url={src}
       alt=""
       decoding="async"
       draggable={false}
       className="absolute inset-0 h-full w-full object-cover"
-      onError={() => (attempt < 2 ? window.setTimeout(() => setAttempt((a) => a + 1), 800) : setFailed(true))}
+      fallback={
+        <span className="absolute inset-0 flex items-center justify-center text-[10px] text-muted">
+          Preview unavailable
+        </span>
+      }
     />
   )
 }
