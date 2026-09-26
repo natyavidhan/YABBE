@@ -7,6 +7,7 @@ import { toast } from '../components/toast'
 import { Button, NumberInput, Spinner } from '../components/ui'
 import { cuts, transitionLength, useEditor } from './store'
 import { useTransitionCatalog } from './transitionCatalog'
+import { Section } from '../components/Section'
 
 /** Inspector for the selected transition (identified by the clip it leaves). */
 export function TransitionPanel({ clipId }: { clipId: string }) {
@@ -61,11 +62,8 @@ export function TransitionPanel({ clipId }: { clipId: string }) {
         </span>
       </div>
 
-      <div className="flex flex-col gap-2 border-b border-line px-3 py-3">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-semibold">{current?.name ?? t.kind}</span>
-          <span className="text-[11px] text-faint">centred on the cut</span>
-        </div>
+      <Section icon={<ArrowRightLeft size={14} />} title="Transition settings">
+        <p className="-mt-1 text-[11px] text-faint">{current?.name ?? t.kind} · centred on the cut</p>
         <div className="flex items-center gap-2">
           <span className="w-14 text-xs text-muted">Duration</span>
           <input
@@ -122,7 +120,7 @@ export function TransitionPanel({ clipId }: { clipId: string }) {
             <Trash2 size={13} /> Remove
           </Button>
         </div>
-      </div>
+      </Section>
 
       {!catalog ? (
         <div className="flex flex-1 items-center justify-center text-muted">

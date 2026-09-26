@@ -10,6 +10,7 @@ import {
   Flag,
   Gauge,
   Minus,
+  Settings2,
   Trash2,
   Plus,
   Crop as CropIcon,
@@ -20,7 +21,6 @@ import {
   Minimize,
   MousePointerClick,
   Move,
-  RotateCcw,
   Timer,
   Type,
   Volume2,
@@ -35,6 +35,7 @@ import { toast } from '../components/toast'
 import { fillScale, sourceSize } from './geometry'
 import { allKeyTimes, EASES, framesOf, keyIndexAt, localTime, MARKER_COLORS, propAt, textStyleAt, visibleMarkers } from './keyframes'
 import { ProjectSettingsForm } from './ProjectSettings'
+import { FoldAllButton, Section } from '../components/Section'
 import { TransitionPanel } from './TransitionPanel'
 import { clipEnd, gapAfter, MAX_SPEED, maxClipDuration, MIN_CLIP, MIN_SPEED, overlaps, speedRange, useEditor, type ClipPatch } from './store'
 
@@ -59,9 +60,9 @@ function ClipOrProjectInspector() {
     return (
       <div className="min-h-0 flex-1 overflow-y-auto">
         <PanelTitle>Project</PanelTitle>
-        <div className="p-3">
+        <Section icon={<Settings2 size={14} />} title="Project settings">
           <ProjectSettingsForm />
-        </div>
+        </Section>
         <p className="px-3 pb-4 text-xs leading-relaxed text-faint">
           Select a clip on the timeline or in the preview to edit its position, crop, text or audio.
         </p>
@@ -85,33 +86,6 @@ function PanelTitle({ children }: { children: ReactNode }) {
     <div className="flex h-10 items-center border-b border-line px-3 text-xs font-semibold tracking-wide text-muted uppercase">
       {children}
     </div>
-  )
-}
-
-function Section({
-  icon,
-  title,
-  children,
-  onReset,
-}: {
-  icon: ReactNode
-  title: string
-  children: ReactNode
-  onReset?: () => void
-}) {
-  return (
-    <section className="border-b border-line px-3 py-3">
-      <div className="mb-2.5 flex items-center gap-2">
-        <span className="text-faint">{icon}</span>
-        <h3 className="flex-1 text-xs font-semibold">{title}</h3>
-        {onReset && (
-          <IconButton label={`Reset ${title.toLowerCase()}`} onClick={onReset} className="h-6! w-6!">
-            <RotateCcw size={12} />
-          </IconButton>
-        )}
-      </div>
-      <div className="flex flex-col gap-2">{children}</div>
-    </section>
   )
 }
 
@@ -236,9 +210,10 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
         <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${typeBadge[clip.type]}`}>
           {clip.type === 'image' ? 'photo' : clip.type}
         </span>
-        <span className="truncate font-medium" title={title}>
+        <span className="flex-1 truncate font-medium" title={title}>
           {title}
         </span>
+        <FoldAllButton />
       </div>
       {locked && <div className="bg-warn/10 px-3 py-2 text-xs text-warn">This clip is on a locked track.</div>}
 
