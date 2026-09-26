@@ -1,0 +1,142 @@
+import { useEffect, useRef } from 'react'
+import { api } from '../api/client'
+import { toast } from '../components/toast'
+import { docDuration, textKey, useEditor } from './store'
+
+const AUTOSAVE_DELAY = 700
+
+/** Debounced autosave of the editable doc; flushes on unmount / tab close. */
+export function useAutosave(projectId: string) {
+  const version = useEditor((s) => s.version)
+  const saving = useRef<Promise<void> | null>(null)
+  const timer = useRef<number | undefined>(undefined)
+
+  const flush = useRef(async () => {
+    const s = useEditor.getState()
+    if (s.version === s.savedVersion || s.projectId !== projectId) return
+    const v = s.version
+    const { name, settings, tracks, clips } = s.doc
+    try {
+      if (saving.current) await saving.current
+      saving.current = api.saveProject(projectId, { name, settings, tracks, clips }).then(() => {
+        useEditor.getState().markSaved(v)
+      })
+      await saving.current
+    } catch (e) {
+      toast.error(`Autosave failed: ${e instanceof Error ? e.message : e}`)
+    } finally {
+      saving.current = null
+    }
+  })
+
+  useEffect(() => {
+    if (version === 0) return
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => flush.current(), AUTOSAVE_DELAY)
+  }, [version])
+
+  useEffect(() => {
+    const f = flush.current
+    const beforeUnload = (e: BeforeUnloadEvent) => {
+      const s = useEditor.getState()
+      if (s.version !== s.savedVersion) {
+        f()
+        e.preventDefault()
+      }
+    }
+    window.addEventListener('beforeunload', beforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', beforeUnload)
+      window.clearTimeout(timer.current)
+      f()
+    }
+  }, [])
+
+  return flush.current
+}
+
+/** Poll the server while any asset is still being processed. */
+export function useAssetPolling(projectId: string) {
+  const processing = useEditor((s) => s.assets.some((a) => a.status === 'processing'))
+  useEffect(() => {
+    if (!processing) return
+    const id = window.setInterval(async () => {
+      try {
+        const p = await api.getProject(projectId)
+        const before = new Map(useEditor.getState().assets.map((a) => [a.id, a.status]))
+        useEditor.getState().setAssets(p.assets)
+        for (const a of p.assets) {
+          if (before.get(a.id) === 'processing' && a.status === 'error') toast.error(`${a.original_name}: ${a.error}`)
+        }
+      } catch {
+        /* transient */
+      }
+    }, 1500)
+    return () => window.clearInterval(id)
+  }, [processing, projectId])
+}
+
+/** Keep the rasterised size of every text clip known (for on-canvas handles). */
+export function useTextMeasurements() {
+  const clips = useEditor((s) => s.doc.clips)
+  const sizes = useEditor((s) => s.textSizes)
+  const pending = useRef(new Set<string>())
+  useEffect(() => {
+    for (const c of clips) {
+      if (c.type !== 'text' || !c.text) continue
+      const key = textKey(c.text)
+      if (sizes[key] || pending.current.has(key)) continue
+      pending.current.add(key)
+      api
+        .measureText(c.text)
+        .then((size) => useEditor.getState().setTextSize(key, size))
+        .catch(() => {})
+        .finally(() => pending.current.delete(key))
+    }
+  }, [clips, sizes])
+}
+
+function isTyping(target: EventTarget | null) {
+  const el = target as HTMLElement | null
+  if (!el) return false
+  const tag = el.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
+}
+
+export function useShortcuts() {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isTyping(e.target)) return
+      const s = useEditor.getState()
+      const mod = e.ctrlKey || e.metaKey
+      const fps = s.doc.settings.fps
+      const key = e.key.toLowerCase()
+      let handled = true
+      if (mod && key === 'z' && !e.shiftKey) s.undo()
+      else if (mod && ((key === 'z' && e.shiftKey) || key === 'y')) s.redo()
+      else if (mod && key === 'd') s.duplicateSelected()
+      else if (mod && key === 'a') s.select(s.doc.clips.map((c) => c.id))
+      else if (mod && key === 'b') s.splitAtPlayhead()
+      else if (mod) handled = false
+      else if (e.key === ' ') s.setPlaying(!s.playing)
+      else if (key === 's') s.splitAtPlayhead()
+      else if (e.key === 'Delete' || e.key === 'Backspace') s.deleteSelected()
+      else if (e.key === 'Escape') s.select([])
+      else if (e.key === 'ArrowLeft') {
+        s.setPlaying(false)
+        s.setPlayhead(Math.max(0, (Math.round(s.playhead * fps) - (e.shiftKey ? Math.round(fps) : 1)) / fps))
+      } else if (e.key === 'ArrowRight') {
+        s.setPlaying(false)
+        s.setPlayhead((Math.round(s.playhead * fps) + (e.shiftKey ? Math.round(fps) : 1)) / fps)
+      } else if (e.key === 'Home') s.setPlayhead(0)
+      else if (e.key === 'End') s.setPlayhead(docDuration(s.doc))
+      else if (e.key === '=' || e.key === '+') s.setZoom(s.zoom * 1.25)
+      else if (e.key === '-') s.setZoom(s.zoom / 1.25)
+      else if (key === 't') s.addTextClip()
+      else handled = false
+      if (handled) e.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+}

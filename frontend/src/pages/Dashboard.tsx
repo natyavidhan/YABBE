@@ -7,16 +7,8 @@ import { Logo } from '../components/Logo'
 import { toast } from '../components/toast'
 import { Button, Field, inputClass, Modal, ProgressBar, Spinner } from '../components/ui'
 import { formatDuration, formatRelative } from '../lib/format'
+import { FPS_PRESETS, RESOLUTION_PRESETS } from '../lib/presets'
 
-export const RESOLUTION_PRESETS = [
-  { label: '1080p Landscape (1920×1080)', width: 1920, height: 1080 },
-  { label: '720p Landscape (1280×720)', width: 1280, height: 720 },
-  { label: '4K Landscape (3840×2160)', width: 3840, height: 2160 },
-  { label: 'Vertical 1080×1920 (Shorts / Reels)', width: 1080, height: 1920 },
-  { label: 'Square 1080×1080', width: 1080, height: 1080 },
-  { label: 'Portrait 1080×1350', width: 1080, height: 1350 },
-]
-export const FPS_PRESETS = [24, 25, 30, 50, 60]
 
 export default function Dashboard() {
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null)
@@ -371,7 +363,7 @@ function NewProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreat
             ))}
           </select>
         </Field>
-        <Field label="Frame rate">
+        <Field label="Frame rate" group>
           <div className="flex gap-1.5">
             {FPS_PRESETS.map((f) => (
               <button

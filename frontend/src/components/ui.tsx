@@ -91,13 +91,21 @@ export function Modal({
   )
 }
 
-export function Field({ label, children, hint }: { label: string; children: ReactNode; hint?: string }) {
-  return (
-    <label className="flex flex-col gap-1.5">
+/** Labelled form row. Use ``group`` when it wraps several controls (buttons). */
+export function Field({ label, children, hint, group }: { label: string; children: ReactNode; hint?: string; group?: boolean }) {
+  const inner = (
+    <>
       <span className="text-xs font-medium text-muted">{label}</span>
       {children}
       {hint && <span className="text-[11px] text-faint">{hint}</span>}
-    </label>
+    </>
+  )
+  return group ? (
+    <div role="group" aria-label={label} className="flex flex-col gap-1.5">
+      {inner}
+    </div>
+  ) : (
+    <label className="flex flex-col gap-1.5">{inner}</label>
   )
 }
 
