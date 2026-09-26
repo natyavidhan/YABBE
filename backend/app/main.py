@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import config
-from .api import media, projects, render
+from .api import media, projects, render, transitions
 from .jobs import jobs
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -34,6 +34,7 @@ app.add_middleware(
 app.include_router(projects.router)
 app.include_router(media.router)
 app.include_router(render.router)
+app.include_router(transitions.router)
 
 # Serve the built SPA when present (production / docker).
 if config.STATIC_DIR.is_dir():

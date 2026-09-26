@@ -112,6 +112,14 @@ class TextStyle(_Model):
 ClipType = Literal["video", "audio", "image", "text"]
 
 
+class Transition(_Model):
+    """Transition from this clip into the next clip that touches it on the same
+    track, centred on the cut (see engine/transitions.py for the kinds)."""
+
+    kind: str = Field("mix", max_length=40)
+    duration: float = Field(0.5, ge=0.04, le=5)
+
+
 class Marker(_Model):
     """A named point on a clip. ``t`` is seconds from the clip's start, kept on
     the same moment of footage through moves, trims, splits and speed changes
@@ -213,6 +221,7 @@ class Clip(_Model):
     # Animated properties; a property with keyframes ignores its static value.
     keyframes: dict[AnimProp, list[Keyframe]] = Field(default_factory=dict)
     markers: list[Marker] = Field(default_factory=list, max_length=500)
+    transition: Optional[Transition] = None
 
     @field_validator("keyframes")
     @classmethod

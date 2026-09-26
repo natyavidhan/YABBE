@@ -23,7 +23,8 @@ from typing import Optional
 
 from .. import config
 from ..models import Asset, Clip, Keyframe, Project
-from . import keyframes, media, text
+from . import keyframes, media, text, transitions
+from .cmdfile import Commands as _Commands
 
 EPS = 1e-6
 AUDIO_RATE = 48000
@@ -185,48 +186,203 @@ def _signed(v: float) -> str:
     return ("+" if v >= 0 else "-") + _num(abs(v))
 
 
-class _Commands:
-    """Per-frame filter commands for one layer, written as a sendcmd file.
-
-    Each channel is a list of values (one per output frame) sent to
-    ``target``/``command`` only when the formatted value changes."""
-
-    def __init__(self, start: float, fps: float):
-        self.start, self.fps = start, fps
-        self.channels: list[tuple[str, str, list[str]]] = []
-
-    def add(self, target: str, command: str, values: list[str]) -> None:
-        self.channels.append((target, command, values))
-
-    def write(self) -> Optional[Path]:
-        if not self.channels:
-            return None
-        n = max(len(v) for _, _, v in self.channels)
-        last: dict[int, str] = {}
-        lines = []
-        for i in range(n):
-            cmds = []
-            for c, (target, command, values) in enumerate(self.channels):
-                v = values[min(i, len(values) - 1)]
-                if last.get(c) != v:
-                    cmds.append(f"{target} {command} {v}")
-                    last[c] = v
-            if cmds:
-                lines.append(f"{self.start + i / self.fps:.6f} " + ", ".join(cmds) + ";")
-        body = "\n".join(lines) + "\n"
-        d = config.DATA_DIR / "cache" / "cmd"
-        d.mkdir(parents=True, exist_ok=True)
-        path = d / (hashlib.sha1(body.encode()).hexdigest()[:20] + ".txt")
-        if not path.is_file():
-            tmp = path.with_suffix(".tmp")
-            tmp.write_text(body)
-            tmp.replace(path)
-        return path
-
-
 def _path_for(project: Project, asset: Asset, win: Window) -> Optional[Path]:
     p = media.preview_source(project.id, asset) if win.use_proxies else media.source_path(project.id, asset)
     return p if p.is_file() else None
+
+
+@dataclass
+class _Plan:
+    """An active transition: A's end cut into B, occupying [a, b] on the timeline."""
+
+    track_id: str
+    A: Clip
+    B: Clip
+    a: float
+    b: float
+    kind: str
+
+
+def plan_transitions(project: Project) -> list[_Plan]:
+    """Transitions whose clips actually touch (same track, B starts at A's end)."""
+    fps = project.settings.fps
+    by_track: dict[str, list[Clip]] = {}
+    for c in project.clips:
+        if c.is_visual:
+            by_track.setdefault(c.track_id, []).append(c)
+    plans = []
+    for tid, lst in by_track.items():
+        lst.sort(key=lambda c: c.start)
+        for A, B in zip(lst, lst[1:]):
+            if A.transition is None or abs(B.start - A.end) > 0.5 / fps:
+                continue
+            d = min(A.transition.duration, A.duration, B.duration)
+            if d < 1 / fps:
+                continue
+            plans.append(_Plan(tid, A, B, A.end - d / 2, A.end + d / 2, A.transition.kind))
+    return plans
+
+
+def _add_video_input(
+    g: Graph, project: Project, clip: Clip, asset: Optional[Asset], vis: _Visible, win: Window,
+    single_frame: bool, extend: bool = False,
+) -> Optional[tuple[int, list[str], Optional[tuple[int, int]]]]:
+    """Add the input for a clip's picture. Returns (input index, filters to run
+    right after timing is normalised, text canvas size). With ``extend`` the clip
+    may be asked for time before its start / after its end (transitions): real
+    footage is used where it exists, otherwise the edge frame is held."""
+    fps = project.settings.fps
+    if clip.type == "text":
+        if clip.text is None:
+            return None
+        if clip.text_animated and not single_frame:
+            n = max(1, math.ceil(vis.length * fps)) + 1
+            styles = [keyframes.text_style_at(clip, vis.into + i / fps) for i in range(n)]
+            seq, cw, ch = text.animated_sequence(styles, fps)
+            return g.add_input("-f", "concat", "-safe", "0", "-i", str(seq)), [], (cw, ch)
+        png, _, _ = text.render_text(keyframes.text_style_at(clip, vis.into))
+        return g.add_input("-loop", "1", "-framerate", _num(fps), "-t", _num(vis.length + 1 / fps), "-i", str(png)), [], None
+    if asset is None:
+        return None
+    path = _path_for(project, asset, win)
+    if path is None:
+        return None
+    if asset.kind == "image":
+        return g.add_input("-loop", "1", "-framerate", _num(fps), "-t", _num(vis.length + 1 / fps), "-i", str(path)), [], None
+    pad = 2 / fps * clip.speed
+    if not extend:
+        return g.add_input("-ss", _num(vis.src_in), "-t", _num(vis.src_len + pad), "-i", str(path)), [], None
+    # Transition: clamp the read to real footage and hold edge frames for the rest.
+    want = vis.src_in
+    last = max(0.0, asset.duration - 1 / fps)
+    start = min(max(want, 0.0), last)
+    pre = max(0.0, (start - want) / clip.speed)  # timeline seconds to hold the first frame
+    read = max(1 / fps * clip.speed, min(vis.src_len - pre * clip.speed, asset.duration - start))
+    post = max(0.0, vis.length - pre - read / clip.speed) + 2 / fps
+    extra = []
+    if pre > 0 or post > 0:
+        extra.append(
+            f"tpad=start_mode=clone:start_duration={pre:.4f}:stop_mode=clone:stop_duration={post:.4f}"
+        )
+    return g.add_input("-ss", _num(start), "-t", _num(read + pad), "-i", str(path)), extra, None
+
+
+def _video_layer(
+    g: Graph, project: Project, clip: Clip, vis: _Visible, win: Window, idx: int, pre: list[str],
+    text_canvas: Optional[tuple[int, int]], single_frame: bool,
+) -> Optional[tuple[str, str, str, str]]:
+    """Filter chain for one clip's picture. Returns (label, overlay name, x, y)."""
+    st = project.settings
+    k = win.scale
+    fps = st.fps
+    base = base_size(project, clip, vis.into, text_canvas)
+    if base is None:
+        return None
+    label = f"v{idx}"
+    scale0, scale_kf = _prop(clip, "scale", vis, single_frame)
+    rot0, rot_kf = _prop(clip, "rotation", vis, single_frame)
+    op0, op_kf = _prop(clip, "opacity", vis, single_frame)
+    x0, x_kf = _prop(clip, "x", vis, single_frame)
+    y0, y_kf = _prop(clip, "y", vis, single_frame)
+    bw, bh = base[0] * k, base[1] * k
+    # Animated properties are sampled once per output frame and sent to the
+    # filters as timed commands (exact for any curve shape).
+    n = max(1, math.ceil(vis.length * fps)) + 1
+    sample = lambda fr: keyframes.samples(fr, vis.into, n, fps)  # noqa: E731
+    cmds = _Commands(vis.offset, fps)
+
+    chain = [f"setpts=(PTS-STARTPTS)/{_num(clip.speed)}", *pre, f"setpts=PTS+{_num(vis.offset)}/TB"]
+    sendcmd_at = len(chain)
+    c = clip.crop
+    if not c.is_identity():
+        chain.append(
+            f"crop=iw*{_num(c.width_fraction())}:ih*{_num(c.height_fraction())}"
+            f":iw*{_num(c.left)}:ih*{_num(c.top)}"
+        )
+    tr = clip.transform
+    if scale_kf:
+        # Animated size, padded onto a fixed transparent canvas so the overlay
+        # always receives frames of one size.
+        ss = [max(0.001, v) for v in sample(scale_kf)]
+        lw, lh = _even(bw * max(ss)), _even(bh * max(ss))
+        cmds.add(f"scale@s{idx}", "w", [str(_even(bw * v)) for v in ss])
+        cmds.add(f"scale@s{idx}", "h", [str(_even(bh * v)) for v in ss])
+        chain.append(f"scale@s{idx}=w={_even(bw * ss[0])}:h={_even(bh * ss[0])}")
+    else:
+        lw, lh = _even(bw * scale0), _even(bh * scale0)
+        chain.append(f"scale={lw}:{lh}")
+    if tr.flip_h:
+        chain.append("hflip")
+    if tr.flip_v:
+        chain.append("vflip")
+    rotating = bool(rot_kf) or abs(rot0 % 360) > EPS
+    needs_alpha = clip.type in ("image", "text") or op0 < 1 or bool(op_kf) or rotating or bool(scale_kf)
+    if needs_alpha:
+        chain.append("format=rgba")
+    if scale_kf:
+        chain.append(f"pad=w={lw}:h={lh}:x=(ow-iw)/2:y=(oh-ih)/2:color=black@0:eval=frame")
+    if op_kf:
+        ops = [min(1.0, max(0.0, v)) for v in sample(op_kf)]
+        cmds.add(f"colorchannelmixer@op{idx}", "aa", [f"{v:.4f}" for v in ops])
+        chain.append(f"colorchannelmixer@op{idx}=aa={ops[0]:.4f}")
+    elif op0 < 1:
+        chain.append(f"colorchannelmixer=aa={_num(op0)}")
+    if rot_kf:
+        side = _even(math.hypot(lw, lh)) + 2
+        rs = [math.radians(v) for v in sample(rot_kf)]
+        cmds.add(f"rotate@r{idx}", "a", [f"{v:.5f}" for v in rs])
+        chain.append(f"rotate@r{idx}=a={rs[0]:.5f}:c=0x00000000:ow={side}:oh={side}")
+    elif rotating:
+        rad = _num(math.radians(rot0))
+        chain.append(f"rotate={rad}:c=0x00000000:ow=rotw({rad}):oh=roth({rad})")
+    W2, H2 = st.width / 2, st.height / 2
+    if x_kf:
+        cmds.add(f"overlay@ov{idx}", "x", [f"{(W2 + v) * k:.2f}-w/2" for v in sample(x_kf)])
+    if y_kf:
+        cmds.add(f"overlay@ov{idx}", "y", [f"{(H2 + v) * k:.2f}-h/2" for v in sample(y_kf)])
+    ox = f"{(W2 + x0) * k:.2f}-w/2"
+    oy = f"{(H2 + y0) * k:.2f}-h/2"
+    cmd_file = cmds.write()
+    if cmd_file is not None:
+        chain.insert(sendcmd_at, f"sendcmd=f='{cmd_file}'")
+    g.filters.append(f"[{idx}:v]{','.join(chain)}[{label}]")
+    return label, f"overlay@ov{idx}", ox, oy
+
+
+def _audio_chain(g: Graph, clip: Clip, vis: _Visible, idx: int) -> str:
+    label = f"a{idx}"
+    chain = ["asetpts=PTS-STARTPTS", *_atempo_chain(clip.speed)]
+    chain += [
+        f"aresample={AUDIO_RATE}",
+        "aformat=sample_fmts=fltp:channel_layouts=stereo",
+        f"atrim=duration={_num(vis.length)}",
+    ]
+    o, cd = _num(vis.into), _num(clip.duration)
+    vol0, vol_kf = _prop(clip, "volume", vis, False)
+    vol = "1" if vol_kf else _num(vol0)
+    expr = vol
+    if clip.fade_in > EPS:
+        expr += f"*max(0,min(1,(t+{o})/{_num(clip.fade_in)}))"
+    if clip.fade_out > EPS:
+        expr += f"*max(0,min(1,({cd}-t-{o})/{_num(clip.fade_out)}))"
+    if expr != vol:
+        chain.append(f"volume='{expr}':eval=frame")
+    elif not vol_kf:
+        chain.append(f"volume={vol}")
+    if vol_kf:
+        # Keyframed gain, sampled at 100 Hz and applied by command.
+        rate = 100.0
+        n = max(1, math.ceil(vis.length * rate)) + 1
+        gains = keyframes.samples(vol_kf, vis.into, n, rate)
+        acmds = _Commands(0.0, rate)
+        acmds.add(f"volume@kv{idx}", "volume", [f"{max(0.0, v):.4f}" for v in gains])
+        chain.append(f"asendcmd=f='{acmds.write()}'")
+        chain.append(f"volume@kv{idx}=volume={max(0.0, gains[0]):.4f}:eval=frame")
+    delay_ms = int(round(vis.offset * 1000))
+    if delay_ms > 0:
+        chain.append(f"adelay={delay_ms}:all=1")
+    g.filters.append(f"[{idx}:a]{','.join(chain)}[{label}]")
+    return label
 
 
 def build(project: Project, win: Window) -> Graph:
@@ -236,176 +392,97 @@ def build(project: Project, win: Window) -> Graph:
     g.width, g.height = _even(st.width * k), _even(st.height * k)
     fps = st.fps
     dur = win.duration
+    single_frame = win.duration <= 1.5 / fps
     # Track order: tracks[0] is the top layer, so draw from the end of the list.
     track_rank = {t.id: i for i, t in enumerate(project.tracks)}
     tracks = {t.id: t for t in project.tracks}
-    clips = sorted(
-        (c for c in project.clips if c.track_id in tracks),
-        key=lambda c: (-track_rank[c.track_id], c.start),
-    )
+    clips = [c for c in project.clips if c.track_id in tracks]
 
-    video_labels: list[tuple[str, _Visible, str, str, str]] = []
-    single_frame = win.duration <= 1.5 / fps
+    # Transitions take over [a, b] around their cut from the two clips.
+    plans = [p for p in plan_transitions(project) if p.track_id in tracks]
+    lo: dict[str, float] = {}
+    hi: dict[str, float] = {}
+    for p in plans:
+        hi[p.A.id] = p.a
+        lo[p.B.id] = p.b
+
+    # (rank, time, overlay spec) — composited bottom track first, then by time.
+    items: list[tuple[int, float, str, str, str, str, float, float]] = []
     audio_labels: list[str] = []
 
     for clip in clips:
         track = tracks[clip.track_id]
-        vis = _visible(clip, win)
-        if vis is None:
-            continue
         asset = project.asset(clip.asset_id) if clip.asset_id else None
-        wants_video = win.video and clip.is_visual and not track.hidden
+
+        # ---- picture ----------------------------------------------------------------
+        if win.video and clip.is_visual and not track.hidden and (
+            asset is None or asset.has_video or asset.kind == "image" or clip.type == "text"
+        ):
+            a = max(clip.start, lo.get(clip.id, clip.start), win.t0)
+            b = min(clip.end, hi.get(clip.id, clip.end), win.t1)
+            if b - a > EPS:
+                vis = _Visible(clip, a - win.t0, a - clip.start, b - a)
+                inp = _add_video_input(g, project, clip, asset, vis, win, single_frame)
+                if inp is not None:
+                    idx, pre, canvas = inp
+                    layer = _video_layer(g, project, clip, vis, win, idx, pre, canvas, single_frame)
+                    if layer is not None:
+                        label, name, ox, oy = layer
+                        items.append((-track_rank[clip.track_id], clip.start, label, name, ox, oy,
+                                      vis.offset, vis.offset + vis.length))
+
+        # ---- sound (cuts at the cut; transitions are picture-only) -----------------------
         vol_frames = clip.animated("volume")
-        audible = max(k.v for k in vol_frames) > 0 if vol_frames else clip.volume > 0
-        wants_audio = (
+        audible = max(kf.v for kf in vol_frames) > 0 if vol_frames else clip.volume > 0
+        if (
             win.audio and not track.muted and not clip.muted and audible
             and clip.type in ("video", "audio") and asset is not None and asset.has_audio
-        )
-        if not (wants_video or wants_audio):
-            continue
-
-        # ---- input ----------------------------------------------------------------
-        idx: Optional[int] = None
-        text_canvas: Optional[tuple[int, int]] = None
-        if clip.type == "text":
-            if clip.text is None:
-                continue
-            if clip.text_animated and not single_frame:
-                # Style keyframes: one raster per frame on a fixed-size canvas.
-                n = max(1, math.ceil(vis.length * fps)) + 1
-                styles = [keyframes.text_style_at(clip, vis.into + i / fps) for i in range(n)]
-                seq, cw, ch = text.animated_sequence(styles, fps)
-                text_canvas = (cw, ch)
-                idx = g.add_input("-f", "concat", "-safe", "0", "-i", str(seq))
-            else:
-                png, _, _ = text.render_text(keyframes.text_style_at(clip, vis.into))
-                idx = g.add_input(
-                    "-loop", "1", "-framerate", _num(fps), "-t", _num(vis.length + 1 / fps), "-i", str(png)
-                )
-        elif asset is not None:
-            path = _path_for(project, asset, win)
-            if path is None:
-                continue
-            if asset.kind == "image":
-                idx = g.add_input("-loop", "1", "-framerate", _num(fps), "-t", _num(vis.length + 1 / fps), "-i", str(path))
-            else:
-                # Pad the read a little so rounding never leaves a gap at the end.
+        ):
+            avis = _visible(clip, win)
+            path = _path_for(project, asset, win) if avis else None
+            if avis and path is not None:
                 pad = 2 / fps * clip.speed
-                idx = g.add_input("-ss", _num(vis.src_in), "-t", _num(vis.src_len + pad), "-i", str(path))
-        if idx is None:
-            continue
+                idx = g.add_input("-ss", _num(avis.src_in), "-t", _num(avis.src_len + pad), "-i", str(path))
+                audio_labels.append(_audio_chain(g, clip, avis, idx))
 
-        # ---- video ----------------------------------------------------------------
-        if wants_video and (asset is None or asset.has_video or asset.kind == "image" or clip.type == "text"):
-            base = base_size(project, clip, vis.into, text_canvas)
-            if base is not None:
-                label = f"v{idx}"
-                scale0, scale_kf = _prop(clip, "scale", vis, single_frame)
-                rot0, rot_kf = _prop(clip, "rotation", vis, single_frame)
-                op0, op_kf = _prop(clip, "opacity", vis, single_frame)
-                x0, x_kf = _prop(clip, "x", vis, single_frame)
-                y0, y_kf = _prop(clip, "y", vis, single_frame)
-                bw, bh = base[0] * k, base[1] * k
-                # Animated properties are sampled once per output frame and sent
-                # to the filters as timed commands (exact for any curve shape).
-                n = max(1, math.ceil(vis.length * fps)) + 1
-                sample = lambda fr: keyframes.samples(fr, vis.into, n, fps)  # noqa: E731
-                cmds = _Commands(vis.offset, fps)
-
-                chain = [f"setpts=(PTS-STARTPTS)/{_num(clip.speed)}+{_num(vis.offset)}/TB"]
-                sendcmd_at = len(chain)
-                c = clip.crop
-                if not c.is_identity():
-                    chain.append(
-                        f"crop=iw*{_num(c.width_fraction())}:ih*{_num(c.height_fraction())}"
-                        f":iw*{_num(c.left)}:ih*{_num(c.top)}"
-                    )
-                tr = clip.transform
-                if scale_kf:
-                    # Animated size, padded onto a fixed transparent canvas so the
-                    # overlay always receives frames of one size.
-                    ss = [max(0.001, v) for v in sample(scale_kf)]
-                    lw, lh = _even(bw * max(ss)), _even(bh * max(ss))
-                    cmds.add(f"scale@s{idx}", "w", [str(_even(bw * v)) for v in ss])
-                    cmds.add(f"scale@s{idx}", "h", [str(_even(bh * v)) for v in ss])
-                    chain.append(f"scale@s{idx}=w={_even(bw * ss[0])}:h={_even(bh * ss[0])}")
-                else:
-                    lw, lh = _even(bw * scale0), _even(bh * scale0)
-                    chain.append(f"scale={lw}:{lh}")
-                if tr.flip_h:
-                    chain.append("hflip")
-                if tr.flip_v:
-                    chain.append("vflip")
-                rotating = bool(rot_kf) or abs(rot0 % 360) > EPS
-                needs_alpha = (
-                    clip.type in ("image", "text") or op0 < 1 or bool(op_kf) or rotating or bool(scale_kf)
+    # ---- transitions ----------------------------------------------------------------------
+    if win.video:
+        for n, p in enumerate(plans):
+            track = tracks[p.track_id]
+            s0, s1 = max(p.a, win.t0), min(p.b, win.t1)
+            if track.hidden or s1 - s0 <= EPS:
+                continue
+            D = p.b - p.a
+            fulls = []
+            for side, clip in (("a", p.A), ("b", p.B)):
+                full = f"tf{n}{side}"
+                g.filters.append(
+                    f"color=c=black@0:s={g.width}x{g.height}:r={_num(fps)}:d={_num(D)},format=rgba[tc{n}{side}]"
                 )
-                if needs_alpha:
-                    chain.append("format=rgba")
-                if scale_kf:
-                    chain.append(f"pad=w={lw}:h={lh}:x=(ow-iw)/2:y=(oh-ih)/2:color=black@0:eval=frame")
-                if op_kf:
-                    ops = [min(1.0, max(0.0, v)) for v in sample(op_kf)]
-                    cmds.add(f"colorchannelmixer@op{idx}", "aa", [f"{v:.4f}" for v in ops])
-                    chain.append(f"colorchannelmixer@op{idx}=aa={ops[0]:.4f}")
-                elif op0 < 1:
-                    chain.append(f"colorchannelmixer=aa={_num(op0)}")
-                if rot_kf:
-                    side = _even(math.hypot(lw, lh)) + 2
-                    rs = [math.radians(v) for v in sample(rot_kf)]
-                    cmds.add(f"rotate@r{idx}", "a", [f"{v:.5f}" for v in rs])
-                    chain.append(f"rotate@r{idx}=a={rs[0]:.5f}:c=0x00000000:ow={side}:oh={side}")
-                elif rotating:
-                    rad = _num(math.radians(rot0))
-                    chain.append(f"rotate={rad}:c=0x00000000:ow=rotw({rad}):oh=roth({rad})")
-                W2, H2 = st.width / 2, st.height / 2
-                if x_kf:
-                    cmds.add(f"overlay@ov{idx}", "x", [f"{(W2 + v) * k:.2f}-w/2" for v in sample(x_kf)])
-                if y_kf:
-                    cmds.add(f"overlay@ov{idx}", "y", [f"{(H2 + v) * k:.2f}-h/2" for v in sample(y_kf)])
-                ox = f"{(W2 + x0) * k:.2f}-w/2"
-                oy = f"{(H2 + y0) * k:.2f}-h/2"
-                cmd_file = cmds.write()
-                if cmd_file is not None:
-                    chain.insert(sendcmd_at, f"sendcmd=f='{cmd_file}'")
-                g.filters.append(f"[{idx}:v]{','.join(chain)}[{label}]")
-                video_labels.append((label, vis, f"overlay@ov{idx}", ox, oy))
-
-        # ---- audio ----------------------------------------------------------------
-        if wants_audio:
-            label = f"a{idx}"
-            chain = ["asetpts=PTS-STARTPTS", *_atempo_chain(clip.speed)]
-            chain += [
-                f"aresample={AUDIO_RATE}",
-                "aformat=sample_fmts=fltp:channel_layouts=stereo",
-                f"atrim=duration={_num(vis.length)}",
-            ]
-            o, cd = _num(vis.into), _num(clip.duration)
-            vol0, vol_kf = _prop(clip, "volume", vis, False)
-            vol = "1" if vol_kf else _num(vol0)
-            expr = vol
-            if clip.fade_in > EPS:
-                expr += f"*max(0,min(1,(t+{o})/{_num(clip.fade_in)}))"
-            if clip.fade_out > EPS:
-                expr += f"*max(0,min(1,({cd}-t-{o})/{_num(clip.fade_out)}))"
-            if expr != vol:
-                chain.append(f"volume='{expr}':eval=frame")
-            elif not vol_kf:
-                chain.append(f"volume={vol}")
-            if vol_kf:
-                # Keyframed gain, sampled at 100 Hz and applied by command.
-                rate = 100.0
-                n = max(1, math.ceil(vis.length * rate)) + 1
-                gains = keyframes.samples(vol_kf, vis.into, n, rate)
-                acmds = _Commands(0.0, rate)
-                acmds.add(f"volume@kv{idx}", "volume", [f"{max(0.0, v):.4f}" for v in gains])
-                chain.append(f"asendcmd=f='{acmds.write()}'")
-                chain.append(f"volume@kv{idx}=volume={max(0.0, gains[0]):.4f}:eval=frame")
-            delay_ms = int(round(vis.offset * 1000))
-            if delay_ms > 0:
-                chain.append(f"adelay={delay_ms}:all=1")
-            g.filters.append(f"[{idx}:a]{','.join(chain)}[{label}]")
-            audio_labels.append(label)
+                asset = project.asset(clip.asset_id) if clip.asset_id else None
+                vis = _Visible(clip, 0.0, p.a - clip.start, D)
+                inp = _add_video_input(g, project, clip, asset, vis, win, False, extend=True)
+                layer = None
+                if inp is not None:
+                    idx, pre, canvas = inp
+                    layer = _video_layer(g, project, clip, vis, win, idx, pre, canvas, False)
+                if layer is None:
+                    g.filters.append(f"[tc{n}{side}]null[{full}]")
+                else:
+                    label, name, ox, oy = layer
+                    g.filters.append(
+                        f"[tc{n}{side}][{label}]{name}=x={ox}:y={oy}:format=rgb:eof_action=pass,format=rgba[{full}]"
+                    )
+                fulls.append(full)
+            out = f"tx{n}"
+            g.filters.extend(
+                transitions.build_filters(p.kind, fulls[0], fulls[1], out, D, fps, g.width, g.height, f"{n}")
+            )
+            g.filters.append(
+                f"[{out}]trim=start={s0 - p.a:.6f}:end={s1 - p.a:.6f},"
+                f"setpts=PTS-STARTPTS+{s0 - win.t0:.6f}/TB[{out}w]"
+            )
+            items.append((-track_rank[p.track_id], p.a, f"{out}w", "overlay", "0", "0", s0 - win.t0, s1 - win.t0))
 
     # ---- composite video ------------------------------------------------------------
     if win.video:
@@ -415,9 +492,9 @@ def build(project: Project, win: Window) -> Graph:
             f"format=yuv420p[base]"
         )
         current = "base"
-        for n, (label, vis, name, ox, oy) in enumerate(video_labels):
+        items.sort(key=lambda it: (it[0], it[1]))
+        for n, (_, _, label, name, ox, oy, a, b) in enumerate(items):
             out = f"ov{n}"
-            a, b = vis.offset, vis.offset + vis.length
             g.filters.append(
                 f"[{current}][{label}]{name}=x={ox}:y={oy}"
                 f":eof_action=pass:enable='between(t,{_num(a - EPS)},{_num(b - EPS)})'[{out}]"
