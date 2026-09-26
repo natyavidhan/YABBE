@@ -25,10 +25,10 @@ from . import compositor, ffmpeg
 def timeline_key(project: Project) -> str:
     """Hash of everything that affects the rendered output of the project's
     current (main / viewed) sequence."""
-    payload = (
-        project.id
-        + project.main.model_dump_json(exclude={"name", "created_at"})
-        + project.model_dump_json(include={"assets"})
+    from . import nested
+
+    payload = project.id + nested.sequence_key(project, project.main_sequence_id) + project.model_dump_json(
+        include={"assets"}
     )
     return hashlib.sha1(payload.encode()).hexdigest()[:16]
 

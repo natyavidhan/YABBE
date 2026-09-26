@@ -23,7 +23,7 @@ from typing import Optional
 
 from .. import config
 from ..models import Asset, Clip, Keyframe, Project
-from . import keyframes, media, text, transitions
+from . import keyframes, media, nested, text, transitions
 from .cmdfile import Commands as _Commands
 
 EPS = 1e-6
@@ -94,6 +94,9 @@ def ffmpeg_color(color: str) -> str:
 
 
 def source_size(project: Project, clip: Clip, u: float = 0.0) -> Optional[tuple[int, int]]:
+    if clip.type == "sequence":
+        child = project.sequence(clip.sequence_id)
+        return (child.settings.width, child.settings.height) if child else None
     if clip.type == "text":
         if clip.text is None:
             return None
@@ -224,15 +227,40 @@ def plan_transitions(project: Project) -> list[_Plan]:
     return plans
 
 
+def _nested_asset(project: Project, clip: Clip, stack: tuple[str, ...]) -> Optional[Asset]:
+    """A virtual asset describing a nested sequence (None if missing / a loop)."""
+    child = project.sequence(clip.sequence_id)
+    if child is None or child.id in stack:
+        return None
+    return Asset(
+        id=f"seq:{child.id}", kind="video", filename="", original_name=child.name, status="ready",
+        duration=child.duration, width=child.settings.width, height=child.settings.height, fps=child.settings.fps,
+        has_video=True, has_audio=nested.has_audio(project, child.id),
+    )
+
+
+def _nested_height(project: Project, clip: Clip, win: Window) -> int:
+    """Resolution to render a nested sequence at: what the parent will show."""
+    child = project.sequence(clip.sequence_id)
+    assert child is not None
+    st = project.settings
+    fit = min(st.width / child.settings.width, st.height / child.settings.height)
+    frames = clip.animated("scale")
+    scale = max([k.v for k in frames] + [clip.transform.scale]) if frames else clip.transform.scale
+    return nested.render_height(child.settings.height, child.settings.height * fit * max(1.0, scale) * win.scale)
+
+
 def _add_video_input(
     g: Graph, project: Project, clip: Clip, asset: Optional[Asset], vis: _Visible, win: Window,
-    single_frame: bool, extend: bool = False,
+    single_frame: bool, extend: bool = False, stack: tuple[str, ...] = (),
 ) -> Optional[tuple[int, list[str], Optional[tuple[int, int]]]]:
     """Add the input for a clip's picture. Returns (input index, filters to run
     right after timing is normalised, text canvas size). With ``extend`` the clip
     may be asked for time before its start / after its end (transitions): real
     footage is used where it exists, otherwise the edge frame is held."""
     fps = project.settings.fps
+    if clip.type == "sequence":
+        return _add_nested_input(g, project, clip, asset, vis, win, single_frame, stack)
     if clip.type == "text":
         if clip.text is None:
             return None
@@ -266,6 +294,39 @@ def _add_video_input(
             f"tpad=start_mode=clone:start_duration={pre:.4f}:stop_mode=clone:stop_duration={post:.4f}"
         )
     return g.add_input("-ss", _num(start), "-t", _num(read + pad), "-i", str(path)), extra, None
+
+
+def _add_nested_input(
+    g: Graph, project: Project, clip: Clip, asset: Optional[Asset], vis: _Visible, win: Window,
+    single_frame: bool, stack: tuple[str, ...],
+) -> Optional[tuple[int, list[str], Optional[tuple[int, int]]]]:
+    """Input for a nested sequence: a rendered still or range of the child."""
+    if asset is None:
+        return None
+    fps = project.settings.fps
+    height = _nested_height(project, clip, win)
+    draft = win.use_proxies
+    if single_frame:
+        png = nested.render_still(project, clip.sequence_id, max(0.0, vis.src_in), height, draft, stack)
+        if png is None:
+            return None
+        return g.add_input("-loop", "1", "-framerate", _num(fps), "-t", _num(vis.length + 1 / fps), "-i", str(png)), [], None
+    # Clamp to the child's own timeline and hold edge frames beyond it (as for footage).
+    want = vis.src_in
+    child_fps = asset.fps or fps
+    last = max(0.0, asset.duration - 1 / child_fps)
+    start = min(max(want, 0.0), last)
+    pre = max(0.0, (start - want) / clip.speed)
+    read = max(1 / child_fps * clip.speed, min(vis.src_len - pre * clip.speed, asset.duration - start))
+    post = max(0.0, vis.length - pre - read / clip.speed) + 2 / fps
+    src = nested.render_range(project, clip.sequence_id, start, read + 2 / child_fps, height, draft, stack)
+    if src is None:
+        return None
+    extra = []
+    if pre > 0 or post > 0:
+        extra.append(f"tpad=start_mode=clone:start_duration={pre:.4f}:stop_mode=clone:stop_duration={post:.4f}")
+    seek = ["-ss", _num(src.offset)] if src.offset > 0 else []
+    return g.add_input(*seek, "-t", _num(read + 2 / child_fps), "-i", str(src.path)), extra, None
 
 
 def _video_layer(
@@ -394,7 +455,8 @@ def _audio_chain(
     return label
 
 
-def build(project: Project, win: Window) -> Graph:
+def build(project: Project, win: Window, stack: tuple[str, ...] = ()) -> Graph:
+    """``stack``: sequences already being rendered further up (loop guard)."""
     st = project.settings
     g = Graph()
     k = win.scale
@@ -402,6 +464,7 @@ def build(project: Project, win: Window) -> Graph:
     fps = st.fps
     dur = win.duration
     single_frame = win.duration <= 1.5 / fps
+    stack = stack + (project.main_sequence_id,)
     # Track order: tracks[0] is the top layer, so draw from the end of the list.
     track_rank = {t.id: i for i, t in enumerate(project.tracks)}
     tracks = {t.id: t for t in project.tracks}
@@ -426,7 +489,12 @@ def build(project: Project, win: Window) -> Graph:
 
     for clip in clips:
         track = tracks[clip.track_id]
-        asset = project.asset(clip.asset_id) if clip.asset_id else None
+        if clip.type == "sequence":
+            asset = _nested_asset(project, clip, stack)
+            if asset is None:
+                continue  # missing or would contain itself
+        else:
+            asset = project.asset(clip.asset_id) if clip.asset_id else None
 
         # ---- picture ----------------------------------------------------------------
         if win.video and clip.is_visual and not track.hidden and (
@@ -436,7 +504,7 @@ def build(project: Project, win: Window) -> Graph:
             b = min(clip.end, hi.get(clip.id, clip.end), win.t1)
             if b - a > EPS:
                 vis = _Visible(clip, a - win.t0, a - clip.start, b - a)
-                inp = _add_video_input(g, project, clip, asset, vis, win, single_frame)
+                inp = _add_video_input(g, project, clip, asset, vis, win, single_frame, stack=stack)
                 if inp is not None:
                     idx, pre, canvas = inp
                     layer = _video_layer(g, project, clip, vis, win, idx, pre, canvas, single_frame)
@@ -450,7 +518,7 @@ def build(project: Project, win: Window) -> Graph:
         audible = max(kf.v for kf in vol_frames) > 0 if vol_frames else clip.volume > 0
         if (
             win.audio and not track.muted and not clip.muted and audible
-            and clip.type in ("video", "audio") and asset is not None and asset.has_audio
+            and clip.type in ("video", "audio", "sequence") and asset is not None and asset.has_audio
         ):
             fade_in = audio_in.get(clip.id)
             fade_out = audio_out.get(clip.id)
@@ -464,6 +532,19 @@ def build(project: Project, win: Window) -> Graph:
                 src = 0.0
             if asset.duration > 0:  # ...and none past its end
                 e = min(e, s + (asset.duration - src) / clip.speed)
+            if clip.type == "sequence":
+                if e - s > EPS:
+                    avis = _Visible(clip, s - win.t0, into, e - s)
+                    pad = 2 / fps * clip.speed
+                    src_a = nested.render_range(project, clip.sequence_id, avis.src_in, avis.src_len + pad,
+                                                2, win.use_proxies, stack, video=False)
+                    if src_a is not None:
+                        seek = ["-ss", _num(src_a.offset)] if src_a.offset > 0 else []
+                        idx = g.add_input(*seek, "-t", _num(avis.src_len + pad), "-i", str(src_a.path))
+                        xf = tuple(x for x in (("in", *fade_in) if fade_in else None,
+                                               ("out", *fade_out) if fade_out else None) if x)
+                        audio_labels.append(_audio_chain(g, clip, avis, idx, win.t0, xf))
+                continue
             path = _path_for(project, asset, win)
             if e - s > EPS and path is not None:
                 avis = _Visible(clip, s - win.t0, into, e - s)
@@ -486,9 +567,10 @@ def build(project: Project, win: Window) -> Graph:
                 g.filters.append(
                     f"color=c=black@0:s={g.width}x{g.height}:r={_num(fps)}:d={_num(D)},format=rgba[tc{n}{side}]"
                 )
-                asset = project.asset(clip.asset_id) if clip.asset_id else None
+                asset = (_nested_asset(project, clip, stack) if clip.type == "sequence"
+                         else project.asset(clip.asset_id) if clip.asset_id else None)
                 vis = _Visible(clip, 0.0, p.a - clip.start, D)
-                inp = _add_video_input(g, project, clip, asset, vis, win, False, extend=True)
+                inp = _add_video_input(g, project, clip, asset, vis, win, False, extend=True, stack=stack)
                 layer = None
                 if inp is not None:
                     idx, pre, canvas = inp

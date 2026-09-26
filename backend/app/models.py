@@ -109,7 +109,7 @@ class TextStyle(_Model):
     line_spacing: float = Field(1.2, ge=0.5, le=4)
 
 
-ClipType = Literal["video", "audio", "image", "text"]
+ClipType = Literal["video", "audio", "image", "text", "sequence"]
 
 
 class Transition(_Model):
@@ -209,6 +209,7 @@ class Clip(_Model):
     track_id: str
     type: ClipType
     asset_id: Optional[str] = None
+    sequence_id: Optional[str] = None  # for type == "sequence": the nested sequence
     start: float = Field(0.0, ge=0)  # position on the timeline (s)
     duration: float = Field(5.0, gt=0)  # length on the timeline (s)
     in_point: float = Field(0.0, ge=0)  # offset into the source (s, source time)
@@ -266,7 +267,7 @@ class Clip(_Model):
 
     @property
     def is_visual(self) -> bool:
-        return self.type in ("video", "image", "text")
+        return self.type in ("video", "image", "text", "sequence")
 
 
 class Sequence(_Model):
@@ -341,6 +342,32 @@ class Project(_Model):
     @property
     def duration(self) -> float:
         return self.main.duration
+
+    def nested_in(self, sequence_id: str) -> set[str]:
+        """Sequences used directly by ``sequence_id``'s clips."""
+        seq = self.sequence(sequence_id)
+        return {c.sequence_id for c in seq.clips if c.type == "sequence" and c.sequence_id} if seq else set()
+
+    def contains(self, outer: str, inner: str) -> bool:
+        """Does ``outer`` use ``inner`` (directly or through other sequences)?"""
+        seen: set[str] = set()
+        todo = [outer]
+        while todo:
+            cur = todo.pop()
+            for child in self.nested_in(cur):
+                if child == inner:
+                    return True
+                if child not in seen:
+                    seen.add(child)
+                    todo.append(child)
+        return False
+
+    def find_cycle(self) -> Optional[str]:
+        """Name of a sequence that ends up inside itself, if any."""
+        for seq in self.sequences:
+            if self.contains(seq.id, seq.id):
+                return seq.name
+        return None
 
     def view(self, sequence_id: str) -> "Project":
         """A copy whose settings/tracks/clips are those of ``sequence_id``."""

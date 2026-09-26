@@ -92,10 +92,20 @@ def refresh_thumbnail(project_id: str, force: bool = False) -> None:
     jobs.submit("thumbnail", job, project_id=project_id, label="Thumbnail")
 
 
-def sanitize_sequence(seq: Sequence, asset_ids: set[str]) -> Sequence:
-    """Drop clips on unknown tracks or pointing at missing media."""
+def sanitize_sequence(seq: Sequence, asset_ids: set[str], sequence_ids: Optional[set[str]] = None) -> Sequence:
+    """Drop clips on unknown tracks or pointing at missing media / sequences."""
     track_ids = {t.id for t in seq.tracks}
-    seq.clips = [c for c in seq.clips if c.track_id in track_ids and (c.type == "text" or c.asset_id in asset_ids)]
+
+    def ok(c) -> bool:
+        if c.track_id not in track_ids:
+            return False
+        if c.type == "text":
+            return True
+        if c.type == "sequence":
+            return sequence_ids is None or (c.sequence_id in sequence_ids and c.sequence_id != seq.id)
+        return c.asset_id in asset_ids
+
+    seq.clips = [c for c in seq.clips if ok(c)]
     return seq
 
 
@@ -111,7 +121,8 @@ def save_project(project_id: str, body: TimelineUpdate):
         if body.name is not None:
             p.name = body.name.strip() or p.name
         if body.sequences is not None and body.sequences:
-            p.sequences = [sanitize_sequence(s, asset_ids) for s in body.sequences]
+            seq_ids = {x.id for x in body.sequences}
+            p.sequences = [sanitize_sequence(x, asset_ids, seq_ids) for x in body.sequences]
         if body.main_sequence_id is not None and p.sequence(body.main_sequence_id):
             p.main_sequence_id = body.main_sequence_id
         if p.sequence(p.main_sequence_id) is None:
@@ -125,7 +136,10 @@ def save_project(project_id: str, body: TimelineUpdate):
                 target.tracks = body.tracks
             if body.clips is not None:
                 target.clips = body.clips
-            sanitize_sequence(target, asset_ids)
+            sanitize_sequence(target, asset_ids, {x.id for x in p.sequences})
+        loop = p.find_cycle()
+        if loop:
+            raise HTTPException(400, f"“{loop}” would end up inside itself")
         return p
 
     project = storage.update(project_id, apply)
@@ -241,8 +255,9 @@ def _import_from_zip(path: Path, name: Optional[str]) -> Project:
             kept.append(asset)
     project.assets = kept
     ids = {a.id for a in kept}
+    seq_ids = {x.id for x in project.sequences}
     for seq in project.sequences:
-        sanitize_sequence(seq, ids)
+        sanitize_sequence(seq, ids, seq_ids)
     storage.save(project, touch=False)
     for asset in kept:
         schedule_processing(project.id, asset.id)
