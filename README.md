@@ -56,6 +56,21 @@ cd frontend && npm install && npm run dev
 
 Tests: `cd backend && uv run pytest`
 
+### Using it from other devices on your network
+
+* Docker already listens on all interfaces: open `http://<server-ip>:8000`.
+* Without Docker, bind uvicorn to all interfaces and use the built UI:
+
+  ```bash
+  cd frontend && npm run build
+  cd ../backend && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000
+  ```
+
+* The Vite dev server (`npm run dev`) also listens on the LAN (port 5173).
+* If a firewall is enabled, allow the port, e.g. `sudo ufw allow 8000/tcp`.
+
+There is no authentication, so only expose YABBE on networks you trust.
+
 Production without Docker: `cd frontend && npm run build`, then run uvicorn
 from `backend/` — it serves the built UI from `frontend/dist` on the same port.
 

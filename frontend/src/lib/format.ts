@@ -44,6 +44,9 @@ export const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.ma
 
 export const round = (v: number, digits = 3) => Math.round(v * 10 ** digits) / 10 ** digits
 
+/** Random id. Uses getRandomValues because randomUUID only exists in secure
+ * contexts (HTTPS / localhost), and YABBE is often opened over plain-HTTP LAN. */
 export function uid(prefix: string): string {
-  return prefix + crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+  const bytes = crypto.getRandomValues(new Uint8Array(6))
+  return prefix + Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
 }
