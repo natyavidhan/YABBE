@@ -1,12 +1,24 @@
+# docker compose up -d   ->   http://<this-machine>:8000
+# Uses the published image; add --build to build from this checkout instead.
 services:
   yabbe:
+    image: ghcr.io/natyavidhan/yabbe:latest
     build: .
-    image: yabbe:latest
+    container_name: yabbe
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/data
+      # Projects, uploads, caches and exports. To use a host folder instead:
+      #   - ./data:/data   (and set PUID/PGID to your `id -u` / `id -g`)
+      - yabbe-data:/data
     environment:
-      YABBE_JOB_WORKERS: "2"
-      YABBE_PREVIEW_WORKERS: "2"
+      PUID: "1000"
+      PGID: "1000"
+      YABBE_JOB_WORKERS: "2"       # parallel proxy / export jobs
+      YABBE_PREVIEW_WORKERS: "2"   # parallel preview segment renders
+      # YABBE_PREVIEW_HEIGHT: "480"
+      # YABBE_PROXY_HEIGHT: "540"
     restart: unless-stopped
+
+volumes:
+  yabbe-data:

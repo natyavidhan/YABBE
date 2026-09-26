@@ -11,12 +11,43 @@ See [`docs/PLAN.md`](docs/PLAN.md) for the architecture and feature list.
 
 ## Quick start (Docker)
 
+One command, nothing else to install — the image contains the UI, the API
+server, FFmpeg and fonts:
+
 ```bash
-docker compose up -d --build
-# open http://localhost:8000
+docker run -d --name yabbe --restart unless-stopped \
+  -p 8000:8000 -v yabbe-data:/data \
+  ghcr.io/natyavidhan/yabbe:latest
 ```
 
-Everything (projects, uploads, caches, exports) lives in `./data`.
+Open **http://localhost:8000** (or `http://<server-ip>:8000` from other devices
+on your network). Images are published for `linux/amd64` and `linux/arm64`
+(Raspberry Pi 4/5, Apple Silicon, ARM servers).
+
+Or with Compose, using the [`docker-compose.yml`](docker-compose.yml) in this repo:
+
+```bash
+docker compose up -d            # pulls the published image
+docker compose up -d --build    # or build from this checkout
+```
+
+**Data** — everything (projects, uploads, caches, exports) lives in the `/data`
+volume. To keep it in a host folder instead, mount it and pass your user and
+group ids so the files stay yours:
+
+```bash
+docker run -d -p 8000:8000 -v "$PWD/yabbe-data:/data" \
+  -e PUID=$(id -u) -e PGID=$(id -g) ghcr.io/natyavidhan/yabbe:latest
+```
+
+**Updating** — `docker pull ghcr.io/natyavidhan/yabbe:latest`, then recreate the
+container (`docker compose pull && docker compose up -d`). Your data volume is
+kept.
+
+The container runs as an unprivileged user, has a health check
+(`/api/health`), and shuts down cleanly. Put it behind a reverse proxy
+(Caddy, nginx, Traefik) for HTTPS; raise the proxy's upload size limit so large
+videos can be uploaded.
 
 ## Features
 
@@ -85,3 +116,7 @@ from `backend/` — it serves the built UI from `frontend/dist` on the same port
 | `YABBE_JOB_WORKERS` | `2` | Parallel background jobs (proxies, exports) |
 | `YABBE_PREVIEW_WORKERS` | `2` | Parallel preview segment renders |
 | `YABBE_STATIC_DIR` | `frontend/dist` | Built UI served by the backend |
+| `PUID` / `PGID` | `1000` | (Docker) user/group that owns `/data` |
+
+Run a single server process: background jobs (proxies, exports) are tracked in
+memory, so don't start uvicorn with multiple workers.

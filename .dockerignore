@@ -3,4 +3,7 @@ data
 **/.venv
 frontend/dist
 **/__pycache__
+**/.pytest_cache
+backend/tests
 .git
+.github

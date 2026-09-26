@@ -25,9 +25,13 @@ def font_index() -> dict[str, dict[str, str]]:
         index: dict[str, dict[str, str]] = {}
         seen: set[Path] = set()
         for root in config.FONT_DIRS:
-            if not root.is_dir():
+            try:
+                if not root.is_dir():
+                    continue
+                candidates = sorted(root.rglob("*"))
+            except OSError:  # e.g. an unreadable home directory in a container
                 continue
-            for path in sorted(root.rglob("*")):
+            for path in candidates:
                 if path.suffix.lower() not in (".ttf", ".otf") or path in seen:
                     continue
                 seen.add(path)
