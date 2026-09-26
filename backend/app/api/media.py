@@ -116,7 +116,8 @@ def delete_asset(project_id: str, asset_id: str):
 
     def apply(p: Project):
         p.assets = [a for a in p.assets if a.id != asset_id]
-        p.clips = [c for c in p.clips if c.asset_id != asset_id]
+        for seq in p.sequences:
+            seq.clips = [c for c in seq.clips if c.asset_id != asset_id]
         return p
 
     storage.update(project_id, apply)

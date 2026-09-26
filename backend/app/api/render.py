@@ -18,17 +18,22 @@ router = APIRouter(prefix="/api", tags=["render"])
 
 
 def _with_timeline(project: Project, timeline: Optional[TimelineUpdate]) -> Project:
-    """Overlay unsaved editor state (settings/tracks/clips) on the stored project,
-    so previews always match what the user sees, even before autosave lands."""
-    if timeline is None:
-        return project
+    """The project viewed as one sequence (``timeline.sequence_id`` or main),
+    with unsaved editor state (settings/tracks/clips) overlaid, so previews
+    always match what the user sees even before autosave lands."""
+    sid = timeline.sequence_id if timeline and timeline.sequence_id else project.main_sequence_id
+    if project.sequence(sid) is None:
+        raise HTTPException(404, "Sequence not found")
     p = project.model_copy(deep=True)
-    if timeline.settings is not None:
-        p.settings = timeline.settings
-    if timeline.tracks is not None:
-        p.tracks = timeline.tracks
-    if timeline.clips is not None:
-        p.clips = timeline.clips
+    p.main_sequence_id = sid
+    if timeline is not None:
+        seq = p.main
+        if timeline.settings is not None:
+            seq.settings = timeline.settings
+        if timeline.tracks is not None:
+            seq.tracks = timeline.tracks
+        if timeline.clips is not None:
+            seq.clips = timeline.clips
     return p
 
 
@@ -91,6 +96,10 @@ class ExportResponse(BaseModel):
 @router.post("/projects/{project_id}/exports", response_model=ExportResponse)
 def start_export(project_id: str, options: render.ExportOptions):
     project = get_project(project_id)
+    if options.sequence_id:
+        if project.sequence(options.sequence_id) is None:
+            raise HTTPException(404, "Sequence not found")
+        project = project.view(options.sequence_id)
     if project.duration <= 0:
         raise HTTPException(400, "The timeline is empty")
     missing = [a.original_name for a in project.assets

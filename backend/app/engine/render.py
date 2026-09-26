@@ -23,8 +23,13 @@ from . import compositor, ffmpeg
 
 
 def timeline_key(project: Project) -> str:
-    """Hash of everything that affects rendered output."""
-    payload = project.model_dump_json(include={"id", "settings", "tracks", "clips", "assets"})
+    """Hash of everything that affects the rendered output of the project's
+    current (main / viewed) sequence."""
+    payload = (
+        project.id
+        + project.main.model_dump_json(exclude={"name", "created_at"})
+        + project.model_dump_json(include={"assets"})
+    )
     return hashlib.sha1(payload.encode()).hexdigest()[:16]
 
 
@@ -189,8 +194,9 @@ QUALITY_AUDIO = {"high": "256k", "medium": "192k", "low": "128k"}
 
 
 class ExportOptions(BaseModel):
-    height: Optional[int] = Field(None, ge=144, le=4320)  # None = project resolution
+    height: Optional[int] = Field(None, ge=144, le=4320)  # None = sequence resolution
     quality: Quality = "medium"
+    sequence_id: Optional[str] = None  # None = main sequence
 
 
 class ExportRecord(BaseModel):
@@ -204,6 +210,7 @@ class ExportRecord(BaseModel):
     duration: float = 0.0
     size: int = 0
     quality: Quality = "medium"
+    sequence_id: Optional[str] = None
     error: Optional[str] = None
     created_at: float = Field(default_factory=time.time)
 
@@ -250,9 +257,12 @@ def new_export_record(project: Project, options: ExportOptions) -> ExportRecord:
     h = options.height or st.height
     k = h / st.height
     stamp = time.strftime("%Y%m%d-%H%M%S")
+    seq = project.main
+    title = project.name if len(project.sequences) == 1 else f"{project.name} · {seq.name}"
     rec = ExportRecord(
-        filename=f"{_slug(project.name)}-{stamp}.mp4",
-        name=f"{project.name} ({compositor._even(st.width * k)}×{compositor._even(st.height * k)})",
+        filename=f"{_slug(title)}-{stamp}.mp4",
+        name=f"{title} ({compositor._even(st.width * k)}×{compositor._even(st.height * k)})",
+        sequence_id=seq.id,
         width=compositor._even(st.width * k),
         height=compositor._even(st.height * k),
         duration=project.duration,

@@ -19,7 +19,7 @@ from starlette.background import BackgroundTask
 from .. import config, storage
 from ..engine import render
 from ..jobs import jobs
-from ..models import Project, ProjectSummary, TimelineUpdate, new_id
+from ..models import Project, ProjectSummary, Sequence, TimelineUpdate, new_id
 from .deps import get_project
 from .media import schedule_processing
 
@@ -92,25 +92,40 @@ def refresh_thumbnail(project_id: str, force: bool = False) -> None:
     jobs.submit("thumbnail", job, project_id=project_id, label="Thumbnail")
 
 
+def sanitize_sequence(seq: Sequence, asset_ids: set[str]) -> Sequence:
+    """Drop clips on unknown tracks or pointing at missing media."""
+    track_ids = {t.id for t in seq.tracks}
+    seq.clips = [c for c in seq.clips if c.track_id in track_ids and (c.type == "text" or c.asset_id in asset_ids)]
+    return seq
+
+
 @router.put("/{project_id}", response_model=Project)
 def save_project(project_id: str, body: TimelineUpdate):
     get_project(project_id)
-    changed_timeline = body.clips is not None or body.tracks is not None or body.settings is not None
+    changed_timeline = any(
+        v is not None for v in (body.sequences, body.main_sequence_id, body.clips, body.tracks, body.settings)
+    )
 
     def apply(p: Project):
+        asset_ids = {a.id for a in p.assets}
         if body.name is not None:
             p.name = body.name.strip() or p.name
-        if body.settings is not None:
-            p.settings = body.settings
-        if body.tracks is not None:
-            p.tracks = body.tracks
-        if body.clips is not None:
-            track_ids = {t.id for t in p.tracks}
-            asset_ids = {a.id for a in p.assets}
-            p.clips = [
-                c for c in body.clips
-                if c.track_id in track_ids and (c.type == "text" or c.asset_id in asset_ids)
-            ]
+        if body.sequences is not None and body.sequences:
+            p.sequences = [sanitize_sequence(s, asset_ids) for s in body.sequences]
+        if body.main_sequence_id is not None and p.sequence(body.main_sequence_id):
+            p.main_sequence_id = body.main_sequence_id
+        if p.sequence(p.main_sequence_id) is None:
+            p.main_sequence_id = p.sequences[0].id
+        # Single-timeline form (older clients): applies to one sequence.
+        if body.settings is not None or body.tracks is not None or body.clips is not None:
+            target = p.sequence(body.sequence_id) or p.main
+            if body.settings is not None:
+                target.settings = body.settings
+            if body.tracks is not None:
+                target.tracks = body.tracks
+            if body.clips is not None:
+                target.clips = body.clips
+            sanitize_sequence(target, asset_ids)
         return p
 
     project = storage.update(project_id, apply)
@@ -226,7 +241,8 @@ def _import_from_zip(path: Path, name: Optional[str]) -> Project:
             kept.append(asset)
     project.assets = kept
     ids = {a.id for a in kept}
-    project.clips = [c for c in project.clips if c.type == "text" or c.asset_id in ids]
+    for seq in project.sequences:
+        sanitize_sequence(seq, ids)
     storage.save(project, touch=False)
     for asset in kept:
         schedule_processing(project.id, asset.id)

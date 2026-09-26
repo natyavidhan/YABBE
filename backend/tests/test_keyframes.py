@@ -13,7 +13,7 @@ from PIL import Image
 from app.engine import keyframes
 from app.models import Clip, Keyframe
 
-from conftest import _upload, _wait_job, _wait_ready
+from conftest import _upload, _wait_job, _wait_ready, main_seq
 
 
 def K(t, v, ease="linear"):
@@ -89,7 +89,7 @@ def test_animated_render_matches_single_frames(client, tmp_path):
     img = _upload(client, pid, photo)
     snd = _upload(client, pid, tone)
     project = _wait_ready(client, pid)
-    vt, at = project["tracks"][1]["id"], project["tracks"][2]["id"]
+    vt, at = main_seq(project)["tracks"][1]["id"], main_seq(project)["tracks"][2]["id"]
     clips = [
         {"track_id": vt, "type": "image", "asset_id": img["id"], "start": 0, "duration": 3,
          "transform": {"scale": 0.3},
@@ -168,7 +168,7 @@ def test_text_style_keyframes(client, tmp_path):
     pid = client.post("/api/projects", json={"name": "text kf", "width": 640, "height": 360, "fps": 25}).json()["id"]
     project = client.get(f"/api/projects/{pid}").json()
     clip = {
-        "track_id": project["tracks"][0]["id"], "type": "text", "start": 0, "duration": 2.5,
+        "track_id": main_seq(project)["tracks"][0]["id"], "type": "text", "start": 0, "duration": 2.5,
         "text": {"content": "YABBE", "size": 60, "color": "#ffffff", "background": "#00c0ff00", "padding": 10},
         "keyframes": {
             "text_size": [{"t": 0, "v": 60}, {"t": 2, "v": 140}],
@@ -178,7 +178,7 @@ def test_text_style_keyframes(client, tmp_path):
     }
     r = client.put(f"/api/projects/{pid}", json={"clips": [clip]})
     assert r.status_code == 200, r.text
-    assert set(r.json()["clips"][0]["keyframes"]) == {"text_size", "text_color", "text_background"}
+    assert set(main_seq(r.json())["clips"][0]["keyframes"]) == {"text_size", "text_color", "text_background"}
 
     singles = {t: Image.open(io.BytesIO(client.post(f"/api/projects/{pid}/frame", json={"t": t, "height": 360}).content))
                for t in (0.2, 1.0, 2.0)}
@@ -215,7 +215,7 @@ def test_new_curves_render_exactly(client, tmp_path):
     img = _upload(client, pid, photo)
     project = _wait_ready(client, pid)
     clip = {
-        "track_id": project["tracks"][1]["id"], "type": "image", "asset_id": img["id"], "start": 0, "duration": 3.2,
+        "track_id": main_seq(project)["tracks"][1]["id"], "type": "image", "asset_id": img["id"], "start": 0, "duration": 3.2,
         "transform": {"scale": 0.25},
         "keyframes": {
             "x": [{"t": 0, "v": -250, "ease": "back_out"}, {"t": 1, "v": 150, "ease": "elastic_out", "ep": [2, 8]},

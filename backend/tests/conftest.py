@@ -64,3 +64,8 @@ def _wait_job(client, jid, timeout=120):
     raise AssertionError("job timed out")
 
 
+
+
+def main_seq(project: dict) -> dict:
+    """The main sequence of a project JSON (tracks / clips / settings live there)."""
+    return next(s for s in project["sequences"] if s["id"] == project["main_sequence_id"])

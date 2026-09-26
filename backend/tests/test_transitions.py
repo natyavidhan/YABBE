@@ -9,7 +9,7 @@ import subprocess
 import pytest
 from PIL import Image
 
-from conftest import _upload, _wait_job, _wait_ready
+from conftest import _upload, _wait_job, _wait_ready, main_seq
 
 
 def _px(client, pid, t, xy=(320, 180)):
@@ -32,7 +32,7 @@ def two_colours(client, tmp_path_factory):
     b = _upload(client, pid, blue)
     v = _upload(client, pid, vid)
     project = _wait_ready(client, pid)
-    return pid, project["tracks"][1]["id"], a["id"], b["id"], v["id"]
+    return pid, main_seq(project)["tracks"][1]["id"], a["id"], b["id"], v["id"]
 
 
 def _set(client, pid, clips):
@@ -124,7 +124,7 @@ def test_audio_crossfade(client, tmp_path):
     pid = client.post("/api/projects", json={"name": "xfade", "width": 320, "height": 180, "fps": 25}).json()["id"]
     lo, hi = _upload(client, pid, low), _upload(client, pid, high)
     project = _wait_ready(client, pid)
-    track = project["tracks"][1]["id"]
+    track = main_seq(project)["tracks"][1]["id"]
 
     def export(audio: bool) -> Path:
         client.put(f"/api/projects/{pid}", json={"clips": [

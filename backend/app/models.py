@@ -8,7 +8,7 @@ import time
 import uuid
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def new_id(prefix: str = "") -> str:
@@ -269,19 +269,80 @@ class Clip(_Model):
         return self.type in ("video", "image", "text")
 
 
+class Sequence(_Model):
+    """One timeline with its own settings. A project has one or more; one is
+    the main sequence (dashboard thumbnail, default export)."""
+
+    id: str = Field(default_factory=lambda: new_id("s_"))
+    name: str = Field("Sequence", max_length=120)
+    settings: ProjectSettings = Field(default_factory=ProjectSettings)
+    tracks: list[Track] = Field(default_factory=list)
+    clips: list[Clip] = Field(default_factory=list)
+    created_at: float = Field(default_factory=time.time)
+
+    @property
+    def duration(self) -> float:
+        return max((c.end for c in self.clips), default=0.0)
+
+
 class Project(_Model):
     id: str = Field(default_factory=lambda: new_id("p_"))
     name: str = "Untitled project"
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
-    settings: ProjectSettings = Field(default_factory=ProjectSettings)
     assets: list[Asset] = Field(default_factory=list)
-    tracks: list[Track] = Field(default_factory=list)
-    clips: list[Clip] = Field(default_factory=list)
+    sequences: list[Sequence] = Field(default_factory=list)
+    main_sequence_id: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _upgrade(cls, data):
+        """Projects from before sequences had one top-level timeline: it
+        becomes the main sequence."""
+        if isinstance(data, dict) and not data.get("sequences"):
+            data = dict(data)
+            legacy = {k: data.pop(k) for k in ("settings", "tracks", "clips") if k in data}
+            seq = {"id": new_id("s_"), "name": "Main", **legacy}
+            data["sequences"] = [seq]
+            data["main_sequence_id"] = seq["id"]
+        return data
+
+    @model_validator(mode="after")
+    def _ensure_main(self):
+        if not self.sequences:
+            self.sequences = [Sequence(name="Main")]
+        if not any(s.id == self.main_sequence_id for s in self.sequences):
+            self.main_sequence_id = self.sequences[0].id
+        return self
+
+    def sequence(self, sequence_id: Optional[str]) -> Optional[Sequence]:
+        return next((s for s in self.sequences if s.id == sequence_id), None)
+
+    @property
+    def main(self) -> Sequence:
+        return self.sequence(self.main_sequence_id) or self.sequences[0]
+
+    # The "current" timeline used by rendering: the main sequence, or whichever
+    # sequence a view() was made for.
+    @property
+    def settings(self) -> ProjectSettings:
+        return self.main.settings
+
+    @property
+    def tracks(self) -> list[Track]:
+        return self.main.tracks
+
+    @property
+    def clips(self) -> list[Clip]:
+        return self.main.clips
 
     @property
     def duration(self) -> float:
-        return max((c.end for c in self.clips), default=0.0)
+        return self.main.duration
+
+    def view(self, sequence_id: str) -> "Project":
+        """A copy whose settings/tracks/clips are those of ``sequence_id``."""
+        return self.model_copy(update={"main_sequence_id": sequence_id})
 
     def asset(self, asset_id: Optional[str]) -> Optional[Asset]:
         return next((a for a in self.assets if a.id == asset_id), None)
@@ -315,6 +376,11 @@ class TimelineUpdate(_Model):
     overwritten from the client (they are only created by uploads)."""
 
     name: Optional[str] = None
+    sequences: Optional[list[Sequence]] = None
+    main_sequence_id: Optional[str] = None
+    # A single timeline's contents (older clients, and unsaved editor state
+    # sent with render requests): applies to ``sequence_id`` or the main one.
+    sequence_id: Optional[str] = None
     settings: Optional[ProjectSettings] = None
     tracks: Optional[list[Track]] = None
     clips: Optional[list[Clip]] = None

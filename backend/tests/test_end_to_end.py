@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest  # noqa: F401
 from PIL import Image
 
-from conftest import _upload, _wait_job, _wait_ready
+from conftest import _upload, _wait_job, _wait_ready, main_seq
 
 
 def test_full_flow(client, media_dir):
@@ -29,7 +29,7 @@ def test_full_flow(client, media_dir):
     assert video["width"] == 640 and video["has_audio"]
     project = _wait_ready(client, pid)
 
-    vt_top, vt_bottom, at = [t["id"] for t in project["tracks"]]
+    vt_top, vt_bottom, at = [t["id"] for t in main_seq(project)["tracks"]]
     clips = [
         {"track_id": vt_bottom, "type": "video", "asset_id": video["id"], "start": 0, "duration": 4,
          "fade_in": 0.5, "volume": 0.8},
@@ -43,7 +43,7 @@ def test_full_flow(client, media_dir):
     ]
     r = client.put(f"/api/projects/{pid}", json={"clips": clips})
     assert r.status_code == 200, r.text
-    assert len(r.json()["clips"]) == 4
+    assert len(main_seq(r.json())["clips"]) == 4
 
     # Frame render (photo layer visible at t=1.5)
     r = client.post(f"/api/projects/{pid}/frame", json={"t": 1.5, "height": 360})
@@ -92,12 +92,12 @@ def test_full_flow(client, media_dir):
     r = client.post("/api/projects/import", content=r.content)
     assert r.status_code == 200, r.text
     imported = r.json()
-    assert imported["id"] != pid and len(imported["clips"]) == 4
+    assert imported["id"] != pid and len(main_seq(imported)["clips"]) == 4
     _wait_ready(client, imported["id"])
 
     # Delete asset removes its clips
     client.delete(f"/api/projects/{pid}/media/{photo['id']}")
-    assert len(client.get(f"/api/projects/{pid}").json()["clips"]) == 3
+    assert len(main_seq(client.get(f"/api/projects/{pid}").json())["clips"]) == 3
 
     assert client.delete(f"/api/projects/{pid}").status_code == 200
     assert client.get(f"/api/projects/{pid}").status_code == 404
@@ -125,14 +125,14 @@ def test_exif_orientation_is_baked_in(client, tmp_path):
 
 def test_clip_markers_round_trip(client):
     pid = client.post("/api/projects", json={"name": "markers"}).json()["id"]
-    track = client.get(f"/api/projects/{pid}").json()["tracks"][0]["id"]
+    track = main_seq(client.get(f"/api/projects/{pid}").json())["tracks"][0]["id"]
     clip = {"track_id": track, "type": "text", "start": 1, "duration": 4, "text": {"content": "m"},
             "link": "l_group1",
             "markers": [{"id": "m_a", "t": 1.5, "label": "Beat", "color": "#3fcf8e"},
                         {"t": 3, "color": "not-a-colour"}]}
     r = client.put(f"/api/projects/{pid}", json={"clips": [clip]})
     assert r.status_code == 200, r.text
-    saved = client.get(f"/api/projects/{pid}").json()["clips"][0]
+    saved = main_seq(client.get(f"/api/projects/{pid}").json())["clips"][0]
     assert saved["link"] == "l_group1"
     markers = saved["markers"]
     assert markers[0] == {"id": "m_a", "t": 1.5, "label": "Beat", "color": "#3fcf8e"}

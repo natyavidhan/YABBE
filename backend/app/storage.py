@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from . import config
-from .models import Project, ProjectSummary, default_tracks
+from .models import Project, ProjectSummary, Sequence, default_tracks
 
 _locks: defaultdict[str, threading.RLock] = defaultdict(threading.RLock)
 _locks_guard = threading.Lock()
@@ -79,9 +79,10 @@ def _make_dirs(project_id: str) -> None:
 
 
 def create_project(name: str, **settings) -> Project:
-    project = Project(name=name or "Untitled project", tracks=default_tracks())
+    main = Sequence(name="Main", tracks=default_tracks())
     if settings:
-        project.settings = project.settings.model_copy(update=settings)
+        main.settings = main.settings.model_copy(update=settings)
+    project = Project(name=name or "Untitled project", sequences=[main], main_sequence_id=main.id)
     _make_dirs(project.id)
     save(project, touch=False)
     return project
