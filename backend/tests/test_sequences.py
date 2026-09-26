@@ -34,6 +34,13 @@ def test_legacy_project_file_is_upgraded(client):
     assert main["name"] == "Main" and main["settings"]["width"] == 1280 and main["clips"][0]["id"] == "c_1"
     summary = next(s for s in client.get("/api/projects").json() if s["id"] == pid)
     assert summary["duration"] == 2 and summary["width"] == 1280
+    # The upgrade is stable and saved: every later read sees the same sequence,
+    # and render requests naming it work (regression: random ids per read).
+    again = client.get(f"/api/projects/{pid}").json()
+    assert again["sequences"][0]["id"] == main["id"] == "s_main"
+    assert '"sequences"' in (d / "project.json").read_text()
+    r = client.post(f"/api/projects/{pid}/frame", json={"t": 0.5, "timeline": {"sequence_id": main["id"]}})
+    assert r.status_code == 200, r.text
     storage.delete(pid)
 
 

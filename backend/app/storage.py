@@ -93,7 +93,12 @@ def load(project_id: str) -> Project:
     if not path.is_file():
         raise ProjectNotFound(project_id)
     with lock(project_id):
-        return Project.model_validate_json(path.read_text(encoding="utf-8"))
+        raw = path.read_text(encoding="utf-8")
+        project = Project.model_validate_json(raw)
+        if '"sequences"' not in raw:
+            # Saved before sequences existed: persist the upgraded form once.
+            _atomic_write(path, project.model_dump_json(indent=2))
+        return project
 
 
 def save(project: Project, touch: bool = True) -> Project:

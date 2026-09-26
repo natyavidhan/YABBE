@@ -302,7 +302,9 @@ class Project(_Model):
         if isinstance(data, dict) and not data.get("sequences"):
             data = dict(data)
             legacy = {k: data.pop(k) for k in ("settings", "tracks", "clips") if k in data}
-            seq = {"id": new_id("s_"), "name": "Main", **legacy}
+            # Stable id: the file may be read (and upgraded) many times before
+            # it is saved again, and clients refer to the sequence by id.
+            seq = {"id": "s_main", "name": "Main", **legacy}
             data["sequences"] = [seq]
             data["main_sequence_id"] = seq["id"]
         return data
