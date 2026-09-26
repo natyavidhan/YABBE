@@ -196,3 +196,14 @@ export function allKeyTimes(clip: Clip): number[] {
   }
   return times.sort((a, b) => a - b)
 }
+
+// -- markers (same time base as keyframes: seconds from the clip's start) -----------------
+
+export const MARKER_COLORS = ['#f2b84b', '#ef5f6b', '#3fcf8e', '#4dabf7', '#9d85ff', '#f783ac']
+
+export const shiftMarkers = (markers: Clip['markers'] | undefined, dt: number): Clip['markers'] =>
+  (markers ?? []).map((m) => ({ ...m, t: m.t + dt }))
+
+/** Markers that currently fall inside the clip (others are hidden after trims). */
+export const visibleMarkers = (clip: Clip) =>
+  (clip.markers ?? []).filter((m) => m.t >= -1e-6 && m.t <= clip.duration + 1e-6).sort((a, b) => a.t - b.t)

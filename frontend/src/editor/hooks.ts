@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { api } from '../api/client'
 import { toast } from '../components/toast'
 import { textStyleAt } from './keyframes'
-import { docDuration, textKey, useEditor } from './store'
+import { allMarkers, docDuration, textKey, useEditor } from './store'
 
 const AUTOSAVE_DELAY = 700
 
@@ -150,6 +150,20 @@ export function useShortcuts() {
       else if (e.key === '=' || e.key === '+') s.setZoom(s.zoom * 1.25)
       else if (e.key === '-') s.setZoom(s.zoom / 1.25)
       else if (key === 't') s.addTextClip()
+      else if (key === 'm') {
+        const err = s.addMarker()
+        if (err) toast.info(err)
+      } else if (e.key === '[' || e.key === ']') {
+        // Jump to the previous / next marker on any clip.
+        const tol = 0.5 / fps
+        const times = allMarkers(s.doc).map((m) => m.time)
+        const target =
+          e.key === ']' ? times.find((t) => t > s.playhead + tol) : [...times].reverse().find((t) => t < s.playhead - tol)
+        if (target !== undefined) {
+          s.setPlaying(false)
+          s.setPlayhead(target)
+        }
+      }
       else handled = false
       if (handled) e.preventDefault()
     }

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
-import type { AnimProp, Asset, Clip, ClipType, Ease, Project, ProjectSettings, TextStyle, Timeline, Track, TrackKind } from '../api/types'
+import type { AnimProp, Asset, Clip, ClipType, Ease, Marker, Project, ProjectSettings, TextStyle, Timeline, Track, TrackKind } from '../api/types'
 import { clamp, uid } from '../lib/format'
-import { colorPropAt, framesOf, isColorProp, keyIndexAt, localTime, propAt, shiftKeyframes, staticColor, staticValue, TEXT_COLOR, TEXT_NUMERIC, upsertKey } from './keyframes'
+import { colorPropAt, shiftMarkers, visibleMarkers, framesOf, isColorProp, keyIndexAt, localTime, propAt, shiftKeyframes, staticColor, staticValue, TEXT_COLOR, TEXT_NUMERIC, upsertKey } from './keyframes'
 
 /** The user-editable part of a project (what undo/redo and autosave cover). */
 export interface Doc {
@@ -90,6 +90,10 @@ interface EditorState {
   setClipSpeed: (id: string, speed: number) => number
   /** Choose the speed that makes the clip's footage play for ``seconds``. */
   fitClipDuration: (id: string, seconds: number) => number
+  /** Add a marker at the playhead on the selected clip; returns an error message or null. */
+  addMarker: () => string | null
+  updateMarker: (clipId: string, markerId: string, patch: Partial<Omit<Marker, 'id'>>) => void
+  removeMarker: (clipId: string, markerId: string) => void
   addAssetClip: (asset: Asset, opts?: { trackId?: string; start?: number }) => string | null
   addTextClip: () => string
   moveClip: (id: string, start: number, trackId: string) => void
@@ -149,6 +153,7 @@ function retime(c: Clip, speed: number): Clip {
     speed,
     duration,
     keyframes,
+    markers: (c.markers ?? []).map((m) => ({ ...m, t: m.t * k })),
     fade_in: Math.min(c.fade_in, duration),
     fade_out: Math.min(c.fade_out, duration),
   }
@@ -218,6 +223,7 @@ function makeClip(partial: Partial<Clip> & Pick<Clip, 'track_id' | 'type'>): Cli
     crop: { left: 0, top: 0, right: 0, bottom: 0 },
     text: null,
     keyframes: {},
+    markers: [],
     ...partial,
   }
 }
@@ -230,6 +236,7 @@ export function applyPatch(c: Clip, patch: ClipPatch): Clip {
     crop: patch.crop ? { ...c.crop, ...patch.crop } : c.crop,
     text: patch.text && c.text ? { ...c.text, ...patch.text } : c.text,
     keyframes: patch.keyframes ?? c.keyframes ?? {},
+    markers: patch.markers ?? c.markers ?? [],
   }
 }
 
@@ -418,6 +425,33 @@ export const useEditor = create<EditorState>((set, get) => {
       return get().setClipSpeed(id, (clip.duration * clip.speed) / seconds)
     },
 
+    addMarker: () => {
+      const { selection, doc, playhead } = get()
+      if (selection.length !== 1) return 'Select one clip to add a marker to'
+      const clip = doc.clips.find((c) => c.id === selection[0])
+      if (!clip) return 'Select one clip to add a marker to'
+      const fps = doc.settings.fps
+      const t = Math.round((playhead - clip.start) * fps) / fps
+      if (t < -1e-6 || t > clip.duration + 1e-6) return 'Move the playhead over the selected clip first'
+      if (visibleMarkers(clip).some((m) => Math.abs(m.t - t) < 0.5 / fps)) return 'There is already a marker here'
+      const n = (clip.markers ?? []).length + 1
+      const marker: Marker = { id: uid('m_'), t, label: `Marker ${n}`, color: '#f2b84b' }
+      setClips((clips) => clips.map((c) => (c.id === clip.id ? { ...c, markers: [...(c.markers ?? []), marker] } : c)))
+      return null
+    },
+
+    updateMarker: (clipId, markerId, patch) =>
+      setClips((clips) =>
+        clips.map((c) =>
+          c.id === clipId ? { ...c, markers: (c.markers ?? []).map((m) => (m.id === markerId ? { ...m, ...patch } : m)) } : c,
+        ),
+      ),
+
+    removeMarker: (clipId, markerId) =>
+      setClips((clips) =>
+        clips.map((c) => (c.id === clipId ? { ...c, markers: (c.markers ?? []).filter((m) => m.id !== markerId) } : c)),
+      ),
+
     clearKeys: (id, prop) => {
       const { playhead } = get()
       setClips((clips) =>
@@ -493,7 +527,8 @@ export const useEditor = create<EditorState>((set, get) => {
         clips.flatMap((c) => {
           if (!ids.has(c.id)) return [c]
           const left = t - c.start
-          const a: Clip = { ...c, duration: left, fade_out: 0 }
+          const inFirst = (m: Marker) => m.t < left - 1e-6
+          const a: Clip = { ...c, duration: left, fade_out: 0, markers: (c.markers ?? []).filter(inFirst) }
           const b: Clip = {
             ...c,
             id: uid('c_'),
@@ -502,6 +537,7 @@ export const useEditor = create<EditorState>((set, get) => {
             in_point: c.in_point + left * c.speed,
             fade_in: 0,
             keyframes: shiftKeyframes(c.keyframes, -left) ?? {},
+            markers: shiftMarkers((c.markers ?? []).filter((m) => !inFirst(m)), -left),
           }
           newSel.push(b.id)
           return [a, b]
@@ -526,7 +562,8 @@ export const useEditor = create<EditorState>((set, get) => {
       for (const c of doc.clips.filter((c) => selection.includes(c.id))) {
         const all = [...doc.clips, ...added]
         const start = findFreeStart(all, c.track_id, clipEnd(c), c.duration)
-        added.push({ ...structuredClone(c), id: uid('c_'), start })
+        const copy = structuredClone(c)
+        added.push({ ...copy, id: uid('c_'), start, markers: (copy.markers ?? []).map((m) => ({ ...m, id: uid('m_') })) })
       }
       setClips((clips) => [...clips, ...added])
       set({ selection: added.map((c) => c.id) })
@@ -581,5 +618,12 @@ export const useEditor = create<EditorState>((set, get) => {
     },
   }
 })
+
+/** Every visible marker on the timeline, in time order. */
+export function allMarkers(doc: Doc) {
+  return doc.clips
+    .flatMap((c) => visibleMarkers(c).map((m) => ({ clip: c, marker: m, time: c.start + m.t })))
+    .sort((a, b) => a.time - b.time)
+}
 
 export const selectDuration = (s: EditorState) => docDuration(s.doc)

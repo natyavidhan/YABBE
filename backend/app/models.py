@@ -110,6 +110,22 @@ class TextStyle(_Model):
 
 ClipType = Literal["video", "audio", "image", "text"]
 
+
+class Marker(_Model):
+    """A named point on a clip. ``t`` is seconds from the clip's start, kept on
+    the same moment of footage through moves, trims, splits and speed changes
+    (it may fall outside the clip after a trim, where it is simply hidden)."""
+
+    id: str = Field(default_factory=lambda: new_id("m_"))
+    t: float
+    label: str = Field("", max_length=200)
+    color: str = "#f2b84b"
+
+    @field_validator("color")
+    @classmethod
+    def _color(cls, v: str) -> str:
+        return v if re.fullmatch(r"#[0-9a-fA-F]{6}", v or "") else "#f2b84b"
+
 AnimProp = Literal[
     "x", "y", "scale", "rotation", "opacity", "volume",
     # text clips: style properties (re-rasterised per frame when animated)
@@ -173,6 +189,7 @@ class Clip(_Model):
     text: Optional[TextStyle] = None
     # Animated properties; a property with keyframes ignores its static value.
     keyframes: dict[AnimProp, list[Keyframe]] = Field(default_factory=dict)
+    markers: list[Marker] = Field(default_factory=list, max_length=500)
 
     @field_validator("keyframes")
     @classmethod

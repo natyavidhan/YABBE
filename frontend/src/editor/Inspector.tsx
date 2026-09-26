@@ -6,8 +6,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Diamond,
+  Flag,
   Gauge,
   Minus,
+  Trash2,
   Plus,
   Crop as CropIcon,
   FlipHorizontal2,
@@ -27,9 +29,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api } from '../api/client'
 import type { AnimProp, Asset, Clip, Ease } from '../api/types'
 import { IconButton, inputClass, NumberInput } from '../components/ui'
-import { formatDuration } from '../lib/format'
+import { formatDuration, formatTimecode } from '../lib/format'
+import { toast } from '../components/toast'
 import { fillScale, sourceSize } from './geometry'
-import { allKeyTimes, EASES, framesOf, keyIndexAt, localTime, propAt, textStyleAt } from './keyframes'
+import { allKeyTimes, EASES, framesOf, keyIndexAt, localTime, MARKER_COLORS, propAt, textStyleAt, visibleMarkers } from './keyframes'
 import { ProjectSettingsForm } from './ProjectSettings'
 import { clipEnd, gapAfter, MAX_SPEED, maxClipDuration, MIN_CLIP, MIN_SPEED, overlaps, speedRange, useEditor, type ClipPatch } from './store'
 
@@ -264,6 +267,8 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
       </Section>
 
       {(clip.type === 'video' || clip.type === 'audio') && <SpeedSection clip={clip} locked={locked} />}
+
+      <MarkersSection clip={clip} locked={locked} />
 
       {visual && (
         <Section
@@ -508,6 +513,90 @@ function KeyframeBar({ clip, disabled }: { clip: Clip; disabled?: boolean }) {
         <X size={13} />
       </IconButton>
     </div>
+  )
+}
+
+/** Markers on this clip: rename, recolour, jump, delete. */
+function MarkersSection({ clip, locked }: { clip: Clip; locked: boolean }) {
+  const fps = useEditor((s) => s.doc.settings.fps)
+  const playhead = useEditor((s) => s.playhead)
+  const { addMarker, updateMarker, removeMarker } = useEditor.getState()
+  const markers = visibleMarkers(clip)
+  const hidden = (clip.markers ?? []).length - markers.length
+  return (
+    <Section icon={<Flag size={14} />} title="Markers">
+      {markers.length === 0 ? (
+        <p className="text-[11px] text-faint">
+          Mark a moment in this clip (press <kbd className="rounded border border-line px-1">M</kbd>). Markers stay on the
+          same frame when you move, trim, split or change the speed of the clip.
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-1">
+          {markers.map((m) => {
+            const time = clip.start + m.t
+            const here = Math.abs(time - playhead) <= 0.5 / fps
+            return (
+              <li key={m.id} className={`flex items-center gap-1.5 rounded-md px-1 py-0.5 ${here ? 'bg-raised' : ''}`}>
+                <button
+                  type="button"
+                  disabled={locked}
+                  title="Change colour"
+                  aria-label="Change marker colour"
+                  onClick={() => {
+                    const i = MARKER_COLORS.indexOf(m.color)
+                    updateMarker(clip.id, m.id, { color: MARKER_COLORS[(i + 1) % MARKER_COLORS.length] })
+                  }}
+                  className="h-4 w-4 shrink-0 rounded-sm border border-black/40"
+                  style={{ background: m.color }}
+                />
+                <input
+                  key={m.label}
+                  defaultValue={m.label}
+                  disabled={locked}
+                  maxLength={200}
+                  aria-label="Marker name"
+                  onBlur={(e) => e.target.value !== m.label && updateMarker(clip.id, m.id, { label: e.target.value })}
+                  onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+                  className="h-7 min-w-0 flex-1 rounded border border-transparent bg-transparent px-1.5 text-xs outline-none hover:border-line focus:border-accent focus:bg-bg"
+                />
+                <button
+                  type="button"
+                  title="Jump to marker"
+                  onClick={() => {
+                    const s = useEditor.getState()
+                    s.setPlaying(false)
+                    s.setPlayhead(time)
+                  }}
+                  className="tabular shrink-0 rounded px-1 font-mono text-[11px] text-muted hover:bg-raised hover:text-fg"
+                >
+                  {formatTimecode(time, fps)}
+                </button>
+                <IconButton label="Delete marker" disabled={locked} onClick={() => removeMarker(clip.id, m.id)} className="h-6! w-6! hover:text-danger!">
+                  <Trash2 size={12} />
+                </IconButton>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+      {hidden > 0 && (
+        <p className="text-[11px] text-faint">
+          {hidden} marker{hidden === 1 ? ' is' : 's are'} in the trimmed-off part of the clip (extend the clip to see
+          {hidden === 1 ? ' it' : ' them'}).
+        </p>
+      )}
+      <button
+        type="button"
+        disabled={locked}
+        onClick={() => {
+          const err = addMarker()
+          if (err) toast.info(err)
+        }}
+        className="flex h-7 items-center justify-center gap-1.5 rounded-md border border-dashed border-line text-xs text-muted hover:border-line-strong hover:text-fg disabled:opacity-40"
+      >
+        <Flag size={12} /> Add marker at playhead
+      </button>
+    </Section>
   )
 }
 

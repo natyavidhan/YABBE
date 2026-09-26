@@ -72,8 +72,15 @@ videos can be uploaded.
   to key it; once animated, any edit at the playhead (inspector or on-canvas
   handles) adds or updates a keyframe. Diamonds on the selected clip jump to
   keys; the bar above the transform fields navigates keys and sets easing.
+* **Markers** — press <kbd>M</kbd> to mark a moment on the selected clip. A
+  marker is pinned to that frame of footage: moving, trimming, splitting or
+  changing the clip's speed carries it along. Name/colour them in the
+  inspector, drag their flags, jump with <kbd>[</kbd> / <kbd>]</kbd>; clips and
+  the playhead snap to them.
 * **Preview** — paused frames are rendered exactly by FFmpeg; playback streams
   a lazily rendered HLS preview, so you only wait for the parts you watch.
+  The master volume next to the play controls only changes how loud the
+  preview plays in your browser — never the project or exports.
 * **Export** — H.264 / AAC MP4 at project or lower resolution with quality
   presets, progress, cancel and download.
 

@@ -414,6 +414,8 @@ const SHORTCUTS: [string, string][] = [
   ['Ctrl+A', 'Select all clips'],
   ['Shift+Click', 'Add / remove clip from selection'],
   ['T', 'Add a text clip at the playhead'],
+  ['M', 'Add a marker on the selected clip'],
+  ['[ / ]', 'Previous / next marker'],
   ['Ctrl+Z / Ctrl+Shift+Z', 'Undo / redo'],
   ['+ / − or Ctrl+Wheel', 'Zoom timeline'],
   ['Esc', 'Clear selection'],

@@ -1,11 +1,12 @@
 import Hls from 'hls.js'
-import { Pause, Play, SkipBack, SkipForward, StepBack, StepForward } from 'lucide-react'
+import { Pause, Play, SkipBack, SkipForward, StepBack, StepForward, Volume1, Volume2, VolumeX } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { Asset } from '../api/types'
 import { toast } from '../components/toast'
 import { IconButton, Spinner } from '../components/ui'
 import { clamp, formatTimecode } from '../lib/format'
+import { usePrefs } from '../lib/prefs'
 import { useMediaQuery } from '../lib/useMedia'
 import { hitTest, layerOf, type Layer } from './geometry'
 import { clipEnd, docDuration, timelineOf, useEditor } from './store'
@@ -155,6 +156,16 @@ function Player({ projectId, height }: { projectId: string; height: number }) {
   const playing = useEditor((s) => s.playing)
   const videoRef = useRef<HTMLVideoElement>(null)
   const [buffering, setBuffering] = useState(false)
+  const volume = usePrefs((p) => p.volume)
+  const muted = usePrefs((p) => p.muted)
+
+  // Master volume is a playback preference only; the project/export is untouched.
+  useEffect(() => {
+    const v = videoRef.current
+    if (!v) return
+    v.volume = volume
+    v.muted = muted
+  }, [volume, muted, playing])
 
   useEffect(() => {
     const video = videoRef.current
@@ -326,6 +337,7 @@ function Transport({
           <SkipForward size={15} />
         </IconButton>
       </div>
+      <MasterVolume compact={compact} />
       <div className={`items-center justify-end gap-2 text-xs text-muted ${compact ? 'hidden' : 'flex w-40'}`}>
         <span className="hidden xl:inline">
           {settings.width}×{settings.height}
@@ -344,6 +356,37 @@ function Transport({
           <option value="full">Full</option>
         </select>
       </div>
+    </div>
+  )
+}
+
+/** Preview volume for this browser only (does not change the project's audio). */
+function MasterVolume({ compact }: { compact: boolean }) {
+  const volume = usePrefs((p) => p.volume)
+  const muted = usePrefs((p) => p.muted)
+  const { setVolume, setMuted } = usePrefs.getState()
+  const Icon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2
+  return (
+    <div className="flex items-center gap-1" title="Preview volume (only affects playback here, not the project)">
+      <IconButton
+        label={muted ? 'Unmute preview' : 'Mute preview'}
+        active={muted}
+        onClick={() => setMuted(!muted)}
+      >
+        <Icon size={15} />
+      </IconButton>
+      {!compact && (
+        <input
+          type="range"
+          min={0}
+          max={100}
+          step={1}
+          value={muted ? 0 : Math.round(volume * 100)}
+          onChange={(e) => setVolume(Number(e.target.value) / 100)}
+          className="w-20"
+          aria-label="Preview volume"
+        />
+      )}
     </div>
   )
 }

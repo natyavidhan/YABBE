@@ -4,6 +4,7 @@ import {
   Copy,
   Eye,
   EyeOff,
+  Flag,
   Lock,
   Magnet,
   Plus,
@@ -19,12 +20,13 @@ import {
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { Asset, Clip, Track } from '../api/types'
+import { toast } from '../components/toast'
 import { Button, IconButton, Modal, inputClass } from '../components/ui'
 import { clamp } from '../lib/format'
 import { isTouchEvent, useIsMobile } from '../lib/useMedia'
-import { allKeyTimes, shiftKeyframes } from './keyframes'
+import { allKeyTimes, shiftKeyframes, shiftMarkers, visibleMarkers } from './keyframes'
 import { ASSET_MIME } from './MediaBin'
-import { clipEnd, docDuration, maxClipDuration, MIN_CLIP, overlaps, useEditor } from './store'
+import { allMarkers, clipEnd, docDuration, maxClipDuration, MIN_CLIP, overlaps, useEditor } from './store'
 
 const HEADER_W = 176
 const HEADER_W_COMPACT = 104
@@ -178,6 +180,7 @@ export function Timeline({ projectId }: { projectId: string }) {
     for (const c of s.doc.clips) {
       if (exclude.has(c.id)) continue
       pts.push(c.start, clipEnd(c))
+      for (const m of visibleMarkers(c)) pts.push(c.start + m.t)
     }
     return pts
   }, [])
@@ -255,6 +258,7 @@ export function Timeline({ projectId }: { projectId: string }) {
             in_point: hasSource ? Math.max(0, o.in_point + (start - o.start) * o.speed) : o.in_point,
             // Keyframes are clip-relative: keep them pinned to the same moments.
             keyframes: shiftKeyframes(o.keyframes, o.start - start) ?? {},
+            markers: shiftMarkers(o.markers, o.start - start),
           })
         } else {
           const nextStart = Math.min(Infinity, ...others.filter((c) => c.start >= clipEnd(o) - 1e-6).map((c) => c.start))
@@ -417,6 +421,7 @@ export function Timeline({ projectId }: { projectId: string }) {
             <div className="sticky left-0 z-30 shrink-0 border-r border-b border-line bg-panel" style={{ width: headerW }} />
             <div className="relative flex-1 cursor-pointer touch-none border-b border-line bg-panel-2" onPointerDown={scrub}>
               <Ruler zoom={zoom} from={visible.from} to={visible.to} />
+              <RulerMarkers zoom={zoom} />
               <PlayheadHead />
             </div>
           </div>
@@ -683,6 +688,15 @@ function Toolbar({ compact }: { compact: boolean }) {
       <IconButton label="Delete (Del)" onClick={s.deleteSelected} disabled={!hasSelection}>
         <Trash2 size={15} />
       </IconButton>
+      <IconButton
+        label="Add marker to the selected clip (M)"
+        onClick={() => {
+          const err = s.addMarker()
+          if (err) toast.info(err)
+        }}
+      >
+        <Flag size={15} />
+      </IconButton>
       <div className="mx-1 h-5 w-px bg-line" />
       {!compact && (
         <IconButton label="Add text (T)" onClick={() => s.addTextClip()}>
@@ -808,6 +822,7 @@ const TimelineClip = memo(function TimelineClip({
           style={{ width: clip.fade_out * zoom }}
         />
       )}
+      <ClipMarkers clip={clip} zoom={zoom} locked={locked} compact={compact} />
       {selected && <KeyMarkers clip={clip} zoom={zoom} compact={compact} />}
       {!locked && !compact && (
         <>
@@ -841,6 +856,95 @@ const TimelineClip = memo(function TimelineClip({
     </div>
   )
 })
+
+/** Marker lines on a clip; drag a flag to move it, click to jump there. */
+function ClipMarkers({ clip, zoom, locked, compact }: { clip: Clip; zoom: number; locked: boolean; compact: boolean }) {
+  const markers = visibleMarkers(clip)
+  if (!markers.length) return null
+  const flag = compact ? 16 : 11
+  const onDown = (e: React.PointerEvent, markerId: string, t0: number) => {
+    if (e.button !== 0) return
+    e.stopPropagation()
+    e.preventDefault()
+    const s = useEditor.getState()
+    s.select([clip.id])
+    s.setPlaying(false)
+    s.setPlayhead(clip.start + t0)
+    if (locked) return
+    const x0 = e.clientX
+    let moved = false
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - x0
+      if (!moved && Math.abs(dx) < 3) return
+      const st = useEditor.getState()
+      if (!moved) {
+        moved = true
+        st.beginGesture()
+      }
+      const fps = st.doc.settings.fps
+      const cur = st.doc.clips.find((c) => c.id === clip.id)
+      if (!cur) return
+      const t = clamp(Math.round((t0 + dx / st.zoom) * fps) / fps, 0, cur.duration)
+      st.updateMarker(clip.id, markerId, { t })
+      st.setPlayhead(cur.start + t)
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      if (moved) useEditor.getState().endGesture()
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+  return (
+    <>
+      {markers.map((m) => (
+        <div key={m.id} className="pointer-events-none absolute top-0 bottom-0 z-[4]" style={{ left: m.t * zoom - 1 }}>
+          <div className="absolute top-0 bottom-0 w-[2px] opacity-90" style={{ background: m.color }} />
+          <button
+            title={`${m.label || 'Marker'} — drag to move, click to jump`}
+            aria-label={`Marker ${m.label}`}
+            onPointerDown={(e) => onDown(e, m.id, m.t)}
+            className={`pointer-events-auto absolute top-0 left-0 ${locked ? 'cursor-pointer' : 'cursor-ew-resize'}`}
+            style={{
+              width: flag,
+              height: flag,
+              background: m.color,
+              clipPath: 'polygon(0 0, 100% 0, 100% 60%, 0 100%)',
+              touchAction: 'none',
+            }}
+          />
+        </div>
+      ))}
+    </>
+  )
+}
+
+/** Marker flags in the ruler for every clip (click to jump + select the clip). */
+function RulerMarkers({ zoom }: { zoom: number }) {
+  const doc = useEditor((s) => s.doc)
+  const markers = allMarkers(doc)
+  return (
+    <>
+      {markers.map(({ clip, marker, time }) => (
+        <button
+          key={`${clip.id}/${marker.id}`}
+          title={marker.label || 'Marker'}
+          aria-label={`Jump to marker ${marker.label}`}
+          onPointerDown={(e) => {
+            e.stopPropagation()
+            const s = useEditor.getState()
+            s.setPlaying(false)
+            s.select([clip.id])
+            s.setPlayhead(time)
+          }}
+          className="absolute top-0 z-[5] h-[9px] w-[9px] -translate-x-1/2 rounded-b-sm border border-black/50"
+          style={{ left: time * zoom, background: marker.color }}
+        />
+      ))}
+    </>
+  )
+}
 
 /** Keyframe diamonds along the bottom of the selected clip; click to jump there. */
 function KeyMarkers({ clip, zoom, compact }: { clip: Clip; zoom: number; compact: boolean }) {

@@ -121,3 +121,18 @@ def test_exif_orientation_is_baked_in(client, tmp_path):
     pid = client.post("/api/projects", json={"name": "exif"}).json()["id"]
     asset = _upload(client, pid, path)
     assert (asset["kind"], asset["width"], asset["height"]) == ("image", 200, 400)
+
+
+def test_clip_markers_round_trip(client):
+    pid = client.post("/api/projects", json={"name": "markers"}).json()["id"]
+    track = client.get(f"/api/projects/{pid}").json()["tracks"][0]["id"]
+    clip = {"track_id": track, "type": "text", "start": 1, "duration": 4, "text": {"content": "m"},
+            "markers": [{"id": "m_a", "t": 1.5, "label": "Beat", "color": "#3fcf8e"},
+                        {"t": 3, "color": "not-a-colour"}]}
+    r = client.put(f"/api/projects/{pid}", json={"clips": [clip]})
+    assert r.status_code == 200, r.text
+    markers = client.get(f"/api/projects/{pid}").json()["clips"][0]["markers"]
+    assert markers[0] == {"id": "m_a", "t": 1.5, "label": "Beat", "color": "#3fcf8e"}
+    assert markers[1]["id"].startswith("m_") and markers[1]["color"] == "#f2b84b"
+    # markers don't affect rendering
+    assert client.post(f"/api/projects/{pid}/frame", json={"t": 2}).status_code == 200

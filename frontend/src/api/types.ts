@@ -98,6 +98,14 @@ export interface Keyframe {
   ease: Ease
 }
 
+/** A named point on a clip; ``t`` is seconds from the clip's start. */
+export interface Marker {
+  id: string
+  t: number
+  label: string
+  color: string
+}
+
 export interface Clip {
   id: string
   track_id: string
@@ -115,6 +123,7 @@ export interface Clip {
   crop: Crop
   text: TextStyle | null
   keyframes: Partial<Record<AnimProp, Keyframe[]>>
+  markers: Marker[]
 }
 
 export interface Project {

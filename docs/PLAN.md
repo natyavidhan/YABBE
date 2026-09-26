@@ -53,7 +53,8 @@ FFmpeg on the server.
                           "stroke_color", "stroke_width", "align", "bold", "italic" },
                 "keyframes": { "x|y|scale|rotation|opacity|volume|text_size|text_stroke_width|
                                 text_padding|text_line_spacing":  [ { "t", "v", "ease" } ],
-                               "text_color|text_stroke_color|text_background": [ { "t", "c": "#rrggbbaa", "ease" } ] } } ]
+                               "text_color|text_stroke_color|text_background": [ { "t", "c": "#rrggbbaa", "ease" } ] },
+                "markers": [ { "id", "t", "label", "color" } ] } ]
 }
 ```
 
@@ -106,6 +107,8 @@ Ops
 
 - [x] Keyframes for position, scale, rotation, opacity and volume with easing
 - [x] Text style keyframes: size, colours, outline width, box, padding, spacing
+- [x] Clip markers pinned to footage (move / trim / split / speed safe), snapping, navigation
+- [x] Browser-only master preview volume
 
 ## Later
 Transitions, keyframable crop/colour, effects/filters (colour, blur), audio ducking, captions
