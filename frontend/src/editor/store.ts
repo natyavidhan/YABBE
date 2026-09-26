@@ -146,7 +146,12 @@ function retime(c: Clip, speed: number): Clip {
   const k = duration / c.duration
   const keyframes: Clip['keyframes'] = {}
   for (const [prop, frames] of Object.entries(c.keyframes ?? {}) as [AnimProp, Clip['keyframes'][AnimProp]][]) {
-    keyframes[prop] = frames?.map((f) => ({ ...f, t: f.t * k }))
+    keyframes[prop] = frames?.map((f) => ({
+      ...f,
+      t: f.t * k,
+      hi: f.hi ? [f.hi[0] * k, f.hi[1]] : f.hi,
+      ho: f.ho ? [f.ho[0] * k, f.ho[1]] : f.ho,
+    }))
   }
   return {
     ...c,

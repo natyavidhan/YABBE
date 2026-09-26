@@ -87,7 +87,24 @@ export type AnimProp =
   | 'text_color'
   | 'text_stroke_color'
   | 'text_background'
-export type Ease = 'linear' | 'ease_in' | 'ease_out' | 'ease_in_out' | 'hold'
+export type Ease =
+  | 'linear'
+  | 'hold'
+  | 'bezier'
+  | 'ease_in'
+  | 'ease_out'
+  | 'ease_in_out'
+  | 'back_in'
+  | 'back_out'
+  | 'back_in_out'
+  | 'elastic_in'
+  | 'elastic_out'
+  | 'elastic_in_out'
+  | 'bounce_in'
+  | 'bounce_out'
+  | 'bounce_in_out'
+
+export type HandleMode = 'auto' | 'auto_clamped' | 'aligned' | 'free'
 
 /** ``t`` is seconds from the clip's start; ``ease`` shapes the segment to the next key. */
 export interface Keyframe {
@@ -95,7 +112,14 @@ export interface Keyframe {
   v: number
   /** Colour value (#rrggbb[aa]) for colour properties. */
   c?: string | null
+  /** Shape of the segment from this key to the next. */
   ease: Ease
+  /** Bézier handles as [dt, dv] offsets from the key (incoming / outgoing). */
+  hi?: [number, number] | null
+  ho?: [number, number] | null
+  hm?: HandleMode | null
+  /** Ease parameters (back: overshoot; elastic: oscillations, decay). */
+  ep?: number[] | null
 }
 
 /** A named point on a clip; ``t`` is seconds from the clip's start. */

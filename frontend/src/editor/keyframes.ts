@@ -1,5 +1,6 @@
 // Mirrors backend/app/engine/keyframes.py — keep the curves identical.
 import type { AnimProp, Clip, Ease, Keyframe, TextStyle } from '../api/types'
+import { curveValueAt, namedEase, progressAt } from './curves'
 
 export const ANIM_PROPS: AnimProp[] = ['x', 'y', 'scale', 'rotation', 'opacity', 'volume']
 
@@ -30,32 +31,11 @@ export const EASES: { value: Ease; label: string }[] = [
 ]
 
 export function ease(kind: Ease, p: number): number {
-  p = Math.min(1, Math.max(0, p))
-  switch (kind) {
-    case 'hold':
-      return 0
-    case 'ease_in':
-      return p * p * p
-    case 'ease_out':
-      return 1 - (1 - p) ** 3
-    case 'ease_in_out':
-      return p < 0.5 ? 4 * p * p * p : 1 - (-2 * p + 2) ** 3 / 2
-    default:
-      return p
-  }
+  return namedEase(kind, p)
 }
 
 export function valueAt(frames: Keyframe[], u: number): number {
-  if (u <= frames[0].t) return frames[0].v
-  for (let i = 0; i < frames.length - 1; i++) {
-    const a = frames[i]
-    const b = frames[i + 1]
-    if (u < b.t) {
-      const span = b.t - a.t
-      return a.v + (b.v - a.v) * ease(a.ease, span > 0 ? (u - a.t) / span : 1)
-    }
-  }
-  return frames[frames.length - 1].v
+  return curveValueAt(frames, u)
 }
 
 export function staticValue(clip: Clip, prop: AnimProp): number {
@@ -83,19 +63,11 @@ const hex = (ch: number[]) =>
 
 export function colorAt(frames: Keyframe[], u: number): string {
   const col = (k: Keyframe) => rgba(k.c || '#ffffff')
-  if (u <= frames[0].t) return hex(col(frames[0]))
-  for (let i = 0; i < frames.length - 1; i++) {
-    const a = frames[i]
-    const b = frames[i + 1]
-    if (u < b.t) {
-      const span = b.t - a.t
-      const p = ease(a.ease, span > 0 ? (u - a.t) / span : 1)
-      const ca = col(a)
-      const cb = col(b)
-      return hex(ca.map((x, j) => x + (cb[j] - x) * p))
-    }
-  }
-  return hex(col(frames[frames.length - 1]))
+  if (frames.length === 1) return hex(col(frames[0]))
+  const [i, p] = progressAt(frames, u)
+  const ca = col(frames[i])
+  const cb = col(frames[i + 1])
+  return hex(ca.map((x, j) => x + (cb[j] - x) * p))
 }
 
 /** Colour property at timeline time ``T`` (keyframes applied). */
