@@ -124,8 +124,9 @@ export const api = {
 
   // transitions
   transitions: () => request<TransitionCatalog>('GET', '/api/transitions'),
-  transitionPreviewUrl: (kind: string) => `/api/transitions/${encodeURIComponent(kind)}/preview.webp`,
-  transitionPosterUrl: (kind: string) => `/api/transitions/${encodeURIComponent(kind)}/poster.jpg`,
+  // ?v= matches the server's preview version so browsers never reuse an older cached copy.
+  transitionPreviewUrl: (kind: string) => `/api/transitions/${encodeURIComponent(kind)}/preview.webp?v=2`,
+  transitionPosterUrl: (kind: string) => `/api/transitions/${encodeURIComponent(kind)}/poster.jpg?v=2`,
 
   // text
   fonts: () => request<string[]>('GET', '/api/fonts'),

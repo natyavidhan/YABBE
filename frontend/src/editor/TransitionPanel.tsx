@@ -159,21 +159,11 @@ export function TransitionPanel({ clipId }: { clipId: string }) {
                 title={`Use “${x.name}”`}
               >
                 <div className="relative aspect-video w-full bg-bg">
-                  {/* Still mid-transition; plays the animated preview on hover (or when chosen). */}
-                  <img
-                    src={api.transitionPosterUrl(x.id)}
-                    alt=""
-                    loading="lazy"
-                    className="absolute inset-0 h-full w-full object-cover"
-                    draggable={false}
-                  />
+                  {/* Still mid-transition; plays the animated preview on hover (or when chosen).
+                      Not lazy-loaded: some browsers never load lazy images inside scroll panes. */}
+                  <PreviewImage src={api.transitionPosterUrl(x.id)} />
                   {(hovered === x.id || (x.id === t.kind && (coarse || hovered === null))) && (
-                    <img
-                      src={api.transitionPreviewUrl(x.id)}
-                      alt=""
-                      className="absolute inset-0 h-full w-full object-cover"
-                      draggable={false}
-                    />
+                    <PreviewImage src={api.transitionPreviewUrl(x.id)} />
                   )}
                 </div>
                 <div className="truncate px-2 py-1 text-[11px]">{x.name}</div>
@@ -183,5 +173,35 @@ export function TransitionPanel({ clipId }: { clipId: string }) {
         </>
       )}
     </div>
+  )
+}
+
+/** Image that fills its tile, retrying a couple of times and never showing a blank box. */
+function PreviewImage({ src }: { src: string }) {
+  const [attempt, setAttempt] = useState(0)
+  const [failed, setFailed] = useState(false)
+  if (failed)
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setFailed(false)
+          setAttempt((a) => a + 1)
+        }}
+        className="absolute inset-0 flex items-center justify-center text-[10px] text-muted"
+      >
+        Preview unavailable — tap to retry
+      </button>
+    )
+  return (
+    <img
+      src={attempt ? `${src}&retry=${attempt}` : src}
+      alt=""
+      decoding="async"
+      draggable={false}
+      className="absolute inset-0 h-full w-full object-cover"
+      onError={() => (attempt < 2 ? window.setTimeout(() => setAttempt((a) => a + 1), 800) : setFailed(true))}
+    />
   )
 }
