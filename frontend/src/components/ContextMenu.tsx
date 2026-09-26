@@ -6,6 +6,8 @@ export interface MenuItem {
   shortcut?: string
   danger?: boolean
   disabled?: boolean
+  /** Shown under a disabled item: why it's unavailable. */
+  hint?: string
   onSelect: () => void
 }
 
@@ -72,7 +74,10 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
             }`}
           >
             <span className={`w-4 ${it.danger ? '' : 'text-muted'}`}>{it.icon}</span>
-            <span className="flex-1">{it.label}</span>
+            <span className="flex-1">
+              {it.label}
+              {it.disabled && it.hint && <span className="block max-w-56 text-[10px] text-faint">{it.hint}</span>}
+            </span>
             {it.shortcut && <span className="text-[10px] text-faint">{it.shortcut}</span>}
           </button>
         ),

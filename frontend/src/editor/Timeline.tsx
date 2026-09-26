@@ -14,6 +14,8 @@ import {
   Unlink2,
   EyeOff,
   Flag,
+  Group,
+  Ungroup,
   Lock,
   Magnet,
   Plus,
@@ -38,6 +40,8 @@ import { allKeyTimes, shiftKeyframes, shiftMarkers, visibleMarkers } from './key
 import { ASSET_MIME } from './MediaBin'
 import { allMarkers, assetKey, assetsWithSequences, clipEnd, cuts, docDuration, maxClipDuration, MIN_CLIP, overlaps, transitionLength, useEditor, withLinked } from './store'
 import { RenderBadge } from './Renders'
+import { unnestBlocker } from './nesting'
+import { useSequenceThumb } from './SequenceThumb'
 import { SEQUENCE_MIME } from './Sequences'
 import { ContextMenu } from '../components/ContextMenu'
 import { useTransitionCatalog } from './transitionCatalog'
@@ -838,6 +842,7 @@ function Toolbar({ compact }: { compact: boolean }) {
   const hasSelection = useEditor((s) => s.selection.length > 0)
   const canLink = useEditor((s) => s.selection.length > 1)
   const canUnlink = useEditor((s) => s.doc.clips.some((c) => c.link && s.selection.includes(c.id)))
+  const oneNested = useEditor((s) => s.selection.length === 1 && s.doc.clips.some((c) => c.id === s.selection[0] && c.type === 'sequence'))
   const graphOpen = useEditor((s) => s.graphOpen)
   const anyExpanded = useEditor((s) => s.doc.tracks.some((t) => !s.collapsed[t.id]))
   const s = useEditor.getState()
@@ -857,6 +862,12 @@ function Toolbar({ compact }: { compact: boolean }) {
       </IconButton>
       <IconButton label="Unlink (Ctrl+Shift+L)" onClick={() => s.unlinkSelected()} disabled={!canUnlink}>
         <Unlink2 size={15} />
+      </IconButton>
+      <IconButton label="Nest selected clips into a sequence" onClick={nestSelected} disabled={!hasSelection}>
+        <Group size={15} />
+      </IconButton>
+      <IconButton label="Un-nest (replace the nested clip with its contents)" onClick={unnestSelected} disabled={!oneNested}>
+        <Ungroup size={15} />
       </IconButton>
       <IconButton
         label="Add marker to the selected clip (M)"
@@ -1007,6 +1018,7 @@ const TimelineClip = memo(function TimelineClip({
         {clip.type === 'text' && (
           <div className="truncate px-1.5 text-[11px] text-white/70 italic">{clip.text?.font}</div>
         )}
+        {clip.type === 'sequence' && bodyH >= 14 && <NestedThumb sequenceId={clip.sequence_id} height={bodyH} width={width} aspect={asset ? asset.width / asset.height : 16 / 9} />}
         {showWave && (
           <div className="absolute inset-x-0 bottom-0" style={{ height: clip.type === 'video' ? 12 : bodyH }}>
             <Waveform projectId={projectId} clip={clip} asset={asset!} zoom={zoom} width={width} height={clip.type === 'video' ? 12 : bodyH} />
@@ -1061,6 +1073,29 @@ const TimelineClip = memo(function TimelineClip({
   )
 })
 
+/** A frame of a nested sequence at the start of its clip. */
+function NestedThumb({ sequenceId, height, width, aspect }: { sequenceId?: string | null; height: number; width: number; aspect: number }) {
+  const src = useSequenceThumb(sequenceId)
+  const w = Math.min(height * aspect, width - 4)
+  if (!src || w < 12) return null
+  return <img src={src} alt="" draggable={false} className="absolute top-0 left-0 object-cover opacity-80" style={{ height, width: w }} />
+}
+
+function nestSelected() {
+  const s = useEditor.getState()
+  const err = s.nestSelection()
+  if (err) return toast.info(err)
+  const clip = useEditor.getState().doc.clips.find((c) => c.id === useEditor.getState().selection[0])
+  const seq = useEditor.getState().doc.sequences.find((x) => x.id === clip?.sequence_id)
+  toast.info(`Moved into “${seq?.name ?? 'new sequence'}” — double-click the clip to open it`)
+}
+
+function unnestSelected() {
+  const s = useEditor.getState()
+  const err = s.unnest(s.selection[0])
+  if (err) toast.info(`Can’t un-nest: ${err}`)
+}
+
 /** Right-click menu for the selected clips. */
 function ClipMenu({ x, y, onClose }: { x: number; y: number; onClose: () => void }) {
   const s = useEditor.getState()
@@ -1069,6 +1104,8 @@ function ClipMenu({ x, y, onClose }: { x: number; y: number; onClose: () => void
   const selected = clips.filter((c) => sel.includes(c.id))
   const linkedSel = selected.filter((c) => c.link)
   const allOneGroup = selected.length > 1 && linkedSel.length === selected.length && new Set(linkedSel.map((c) => c.link)).size === 1
+  const nestedClip = selected.length === 1 && selected[0].type === 'sequence' && selected[0].sequence_id ? selected[0] : null
+  const unnestWhy = nestedClip ? unnestBlocker(s.doc, nestedClip) : null
   return (
     <ContextMenu
       x={x}
@@ -1076,7 +1113,7 @@ function ClipMenu({ x, y, onClose }: { x: number; y: number; onClose: () => void
       onClose={onClose}
       items={[
         {
-          label: `Link ${selected.length} clips`,
+          label: selected.length > 1 ? `Link ${selected.length} clips` : "Link clips",
           icon: <Link2 size={13} />,
           shortcut: 'Ctrl+L',
           disabled: selected.length < 2 || allOneGroup,
@@ -1089,6 +1126,29 @@ function ClipMenu({ x, y, onClose }: { x: number; y: number; onClose: () => void
           disabled: !linkedSel.length,
           onSelect: () => s.unlinkSelected(),
         },
+        'divider',
+        {
+          label: selected.length > 1 ? `Nest ${selected.length} clips into a sequence` : 'Nest into a sequence',
+          icon: <Group size={13} />,
+          disabled: !selected.length,
+          onSelect: () => nestSelected(),
+        },
+        ...(nestedClip
+          ? [
+              {
+                label: 'Open nested sequence',
+                icon: <Clapperboard size={13} />,
+                onSelect: () => s.openNested(nestedClip.sequence_id!),
+              },
+              {
+                label: 'Un-nest',
+                icon: <Ungroup size={13} />,
+                disabled: !!unnestWhy,
+                hint: unnestWhy ?? undefined,
+                onSelect: () => unnestSelected(),
+              },
+            ]
+          : []),
         'divider',
         { label: 'Split at playhead', icon: <Scissors size={13} />, shortcut: 'S', onSelect: () => s.splitAtPlayhead() },
         { label: 'Duplicate', icon: <Copy size={13} />, shortcut: 'Ctrl+D', onSelect: () => s.duplicateSelected() },

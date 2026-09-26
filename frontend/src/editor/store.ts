@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { AnimProp, Asset, Clip, ClipType, Ease, Keyframe, Marker, Sequence, Transition, Project, ProjectSettings, TextStyle, Timeline, Track, TrackKind } from '../api/types'
 import { clamp, uid } from '../lib/format'
 import { recalcAuto } from './graph/model'
+import { nestClips, unnestClip } from './nesting'
 import { colorPropAt, shiftMarkers, visibleMarkers, framesOf, isColorProp, keyIndexAt, localTime, propAt, shiftKeyframes, staticColor, staticValue, TEXT_COLOR, TEXT_NUMERIC, upsertKey } from './keyframes'
 
 /** The user-editable part of a project (what undo/redo and autosave cover). */
@@ -154,6 +155,10 @@ interface EditorState {
   /** Sequences above the open one when it was opened from a nested clip (breadcrumbs). */
   crumbs: string[]
   openNested: (sequenceId: string) => void
+  /** Pre-compose the selected clips into a new sequence. Error message or null. */
+  nestSelection: () => string | null
+  /** Replace a nested clip with the clips inside it. Error message or null. */
+  unnest: (clipId: string) => string | null
 
   // graph editor (view state; not part of the project or undo history)
   graphOpen: boolean
@@ -309,8 +314,10 @@ export const docDuration = (d: Doc) => d.clips.reduce((m, c) => Math.max(m, clip
 export const textKey = (t: TextStyle) => JSON.stringify(t)
 
 /** The open sequence's contents, for render requests. */
+/** Unsaved editor state sent with render requests: the open sequence plus every
+ * other one (nested sequences may have changed or be new since the last save). */
 export function timelineOf(doc: Doc): Timeline {
-  return { sequence_id: doc.active, settings: doc.settings, tracks: doc.tracks, clips: doc.clips }
+  return { sequence_id: doc.active, sequences: allSequences(doc) }
 }
 
 // -- nested sequences ------------------------------------------------------------------
@@ -621,6 +628,25 @@ export const useEditor = create<EditorState>((set, get) => {
       const clip = makeClip({ track_id: track.id, type: 'sequence', sequence_id: sequenceId, start, duration })
       change((d) => ({ ...d, tracks, clips: [...d.clips, clip] }))
       set({ selection: [clip.id] })
+      return null
+    },
+
+    nestSelection: () => {
+      const { doc, selection } = get()
+      const r = nestClips(doc, withLinked(selection, doc.clips))
+      if (typeof r === 'string') return r
+      change(() => r.doc)
+      set({ selection: [r.clipId], transSel: null })
+      return null
+    },
+    unnest: (clipId) => {
+      const { doc } = get()
+      const clip = doc.clips.find((c) => c.id === clipId)
+      if (clip && doc.tracks.find((t) => t.id === clip.track_id)?.locked) return 'The track is locked'
+      const r = unnestClip(doc, clipId)
+      if (typeof r === 'string') return r
+      change(() => r.doc)
+      set({ selection: r.ids, transSel: null })
       return null
     },
 

@@ -19,12 +19,15 @@ router = APIRouter(prefix="/api", tags=["render"])
 
 def _with_timeline(project: Project, timeline: Optional[TimelineUpdate]) -> Project:
     """The project viewed as one sequence (``timeline.sequence_id`` or main),
-    with unsaved editor state (settings/tracks/clips) overlaid, so previews
-    always match what the user sees even before autosave lands."""
-    sid = timeline.sequence_id if timeline and timeline.sequence_id else project.main_sequence_id
-    if project.sequence(sid) is None:
-        raise HTTPException(404, "Sequence not found")
+    with unsaved editor state (every sequence, or one's settings/tracks/clips)
+    overlaid, so previews always match what the user sees even before
+    autosave lands - including sequences just created and nested."""
     p = project.model_copy(deep=True)
+    if timeline is not None and timeline.sequences:
+        p.sequences = timeline.sequences
+    sid = timeline.sequence_id if timeline and timeline.sequence_id else p.main_sequence_id
+    if p.sequence(sid) is None:
+        raise HTTPException(404, "Sequence not found")
     p.main_sequence_id = sid
     if timeline is not None:
         seq = p.main

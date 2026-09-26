@@ -8,6 +8,7 @@ import { formatDuration } from '../lib/format'
 import { FPS_PRESETS, RESOLUTION_PRESETS } from '../lib/presets'
 import { ProjectSettingsDialog } from './ProjectSettings'
 import { prerenderMenuItems, RenderBadge } from './Renders'
+import { SequenceThumb } from './SequenceThumb'
 import { allSequences, sequenceDuration, useEditor } from './store'
 
 export const SEQUENCE_MIME = 'application/x-yabbe-sequence'
@@ -95,9 +96,7 @@ export function SequencesPanel({ onOpened }: { onOpened?: () => void }) {
               }`}
             >
               <button type="button" onClick={() => open(seq.id)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
-                <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${active ? 'bg-accent text-white' : 'bg-panel-2 text-muted'}`}>
-                  <Clapperboard size={15} />
-                </span>
+                <SequenceThumb sequenceId={seq.id} active={active} className="h-8 w-14" />
                 <span className="min-w-0 flex-1">
                   {renaming === seq.id ? (
                     <input

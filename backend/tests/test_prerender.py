@@ -108,3 +108,49 @@ def test_auto_prerender(client, tmp_path, monkeypatch):
     client.put(f"/api/projects/{pid}", json={"sequences": [main, inner, mid]})
     time.sleep(1.5)
     assert _status(client, pid, "s_in")[0]["draft"]["state"] == "stale"
+
+
+def test_package_and_duplicate_keep_sequences(client, tmp_path):
+    """.yabbe export/import and duplicate keep sequences + nesting working,
+    and never carry over renders (they're keyed to the original project)."""
+    from app import storage
+
+    pid, main, inner, mid = _setup(client, tmp_path, "pkg")
+    job = client.post(f"/api/projects/{pid}/sequences/s_mid/prerender", json={"quality": "draft"}).json()
+    _wait_job(client, job["id"])
+    before = _frame(client, pid, 1.0, (160, 90))
+
+    def check(new_id):
+        p = client.get(f"/api/projects/{new_id}").json()
+        assert {s["id"] for s in p["sequences"]} == {main["id"], "s_in", "s_mid"}
+        assert p["main_sequence_id"] == main["id"]
+        assert main_seq(p)["clips"][0]["sequence_id"] == "s_mid"
+        assert not (storage.cache_dir(new_id) / "prerender").exists()
+        assert not (storage.cache_dir(new_id) / "nested").exists()
+        st, used = _status(client, new_id, "s_mid")
+        assert used and st["draft"]["state"] == "none"
+        assert _frame(client, new_id, 1.0, (160, 90)) == before
+
+    dup = client.post(f"/api/projects/{pid}/duplicate").json()
+    check(dup["id"])
+
+    pkg = client.get(f"/api/projects/{pid}/package")
+    assert pkg.status_code == 200
+    imported = client.post("/api/projects/import", content=pkg.content).json()
+    _wait_ready(client, imported["id"])
+    check(imported["id"])
+
+
+def test_preview_uses_unsaved_sequences(client, tmp_path):
+    """Render requests carry every sequence's live state: a sequence created and
+    nested moments ago (not saved yet) already shows in the preview."""
+    pid, main, inner, mid = _setup(client, tmp_path, "unsaved")
+    fresh = _seq("s_new", "New", [{"track_id": "s_new_v", "type": "sequence", "sequence_id": "s_in",
+                                   "start": 0, "duration": 2, "transform": {"scale": 0.5}}])
+    live_main = {**main, "clips": [{**main["clips"][0], "sequence_id": "s_new"}]}
+    r = client.post(f"/api/projects/{pid}/frame", json={
+        "t": 1.0, "height": 180, "timeline": {"sequence_id": main["id"], "sequences": [live_main, inner, mid, fresh]}})
+    assert r.status_code == 200, r.text
+    im = Image.open(__import__("io").BytesIO(r.content)).convert("RGB")
+    assert im.getpixel((160, 90))[2] > 150  # blue inside
+    assert max(im.getpixel((10, 10))) < 40  # half size: corner empty

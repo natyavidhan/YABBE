@@ -187,6 +187,7 @@ export function NumberInput({
         ref={inputRef}
         className="tabular h-full w-full min-w-0 bg-transparent px-1.5 text-xs text-fg outline-none"
         value={shown}
+        aria-label={label}
         inputMode="decimal"
         onChange={(e) => setDraft(e.target.value)}
         onFocus={(e) => e.target.select()}

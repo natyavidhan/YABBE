@@ -78,6 +78,12 @@ videos can be uploaded.
   and exports make full-quality pre-renders of nested sequences first, deepest
   first. Badges on sequences and nested clips show fresh / out of date /
   rendering; the Renders panel shows progress, cancels, and frees disk space.
+  **Pre-compose:** select clips → right-click → *Nest into a sequence* (or the
+  toolbar button) moves them into a new sequence, keeping their layering and
+  timing, and puts it in their place. *Un-nest* does the reverse for a nested
+  clip whose own transform, speed, volume and keyframes are untouched (trims
+  are fine — only the part shown comes back). Sequences show a thumbnail in
+  the panel and on nested clips.
 * **Timeline** — multiple video (layer) and audio tracks; move clips between
   tracks, trim either edge, split, duplicate, snapping, zoom, mute / hide /
   lock tracks, undo / redo.

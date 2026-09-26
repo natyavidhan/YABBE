@@ -132,7 +132,7 @@ Ops
       open-from-clip, breadcrumbs)
 - [x] Phase 3 — pre-rendering (draft/preview/full, auto draft in background,
       status badges, render queue, export renders dependencies first)
-- [ ] Phase 4 — pre-compose / un-nest, thumbnails, mobile polish
+- [x] Phase 4 — pre-compose / un-nest, thumbnails, mobile polish
 
 ## Later
 Keyframable crop/colour, effects/filters (colour, blur), audio ducking, captions
