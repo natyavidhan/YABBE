@@ -46,7 +46,7 @@ export default function Dashboard() {
   return (
     <div className="min-h-full">
       <header className="sticky top-0 z-10 border-b border-line bg-bg/85 backdrop-blur">
-        <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-6">
+        <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4 sm:gap-3 sm:px-6">
           <Logo />
           <div className="flex-1" />
           <input
@@ -60,18 +60,20 @@ export default function Dashboard() {
               if (f) onImport(f)
             }}
           />
-          <Button onClick={() => fileRef.current?.click()} disabled={importing !== null}>
+          <Button onClick={() => fileRef.current?.click()} disabled={importing !== null} aria-label="Import project">
             {importing !== null ? <Spinner size={14} /> : <Upload size={15} />}
-            {importing !== null ? `Importing ${Math.round(importing * 100)}%` : 'Import project'}
+            <span className={importing !== null ? '' : 'hidden sm:inline'}>
+              {importing !== null ? `${Math.round(importing * 100)}%` : 'Import project'}
+            </span>
           </Button>
           <Button variant="primary" onClick={() => setCreating(true)}>
-            <Plus size={16} /> New project
+            <Plus size={16} /> New<span className="hidden sm:inline"> project</span>
           </Button>
         </div>
         {importing !== null && <ProgressBar value={importing} className="rounded-none" />}
       </header>
 
-      <main className="mx-auto max-w-6xl px-6 py-8">
+      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
         <div className="mb-6 flex items-baseline justify-between">
           <h1 className="text-xl font-semibold tracking-tight">Projects</h1>
           {projects && projects.length > 0 && (
@@ -88,7 +90,7 @@ export default function Dashboard() {
         ) : projects.length === 0 ? (
           <EmptyState onCreate={() => setCreating(true)} onImport={() => fileRef.current?.click()} />
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-5">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4 sm:gap-5">
             {projects.map((p) => (
               <ProjectCard key={p.id} project={p} bust={bust} onChanged={refresh} onOpen={() => navigate(`/p/${p.id}`)} />
             ))}

@@ -39,6 +39,10 @@ body {
   font-size: 13px;
   -webkit-font-smoothing: antialiased;
   color-scheme: dark;
+  /* No double-tap zoom delay; no pull-to-refresh while scrubbing. */
+  touch-action: manipulation;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 * {

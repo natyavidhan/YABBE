@@ -6,6 +6,7 @@ import type { Asset } from '../api/types'
 import { toast } from '../components/toast'
 import { IconButton, Spinner } from '../components/ui'
 import { clamp, formatTimecode } from '../lib/format'
+import { useMediaQuery } from '../lib/useMedia'
 import { hitTest, layerOf, type Layer } from './geometry'
 import { clipEnd, docDuration, timelineOf, useEditor } from './store'
 
@@ -24,7 +25,7 @@ function loadQuality(): Quality {
   return 'auto'
 }
 
-export function Viewer({ projectId }: { projectId: string }) {
+export function Viewer({ projectId, compact = false }: { projectId: string; compact?: boolean }) {
   const settings = useEditor((s) => s.doc.settings)
   const playing = useEditor((s) => s.playing)
   const [quality, setQuality] = useState<Quality>(loadQuality)
@@ -35,7 +36,7 @@ export function Viewer({ projectId }: { projectId: string }) {
     const el = wrapRef.current
     if (!el) return
     const ro = new ResizeObserver(() => {
-      const pad = 24
+      const pad = compact ? 8 : 24
       const aw = Math.max(0, el.clientWidth - pad * 2)
       const ah = Math.max(0, el.clientHeight - pad * 2)
       const aspect = settings.width / settings.height
@@ -49,7 +50,7 @@ export function Viewer({ projectId }: { projectId: string }) {
     })
     ro.observe(el)
     return () => ro.disconnect()
-  }, [settings.width, settings.height])
+  }, [settings.width, settings.height, compact])
 
   const renderHeight = useMemo(() => {
     if (quality === 'full') return settings.height
@@ -73,6 +74,7 @@ export function Viewer({ projectId }: { projectId: string }) {
         )}
       </div>
       <Transport
+        compact={compact}
         quality={quality}
         onQuality={(q) => {
           setQuality(q)
@@ -276,7 +278,15 @@ function Player({ projectId, height }: { projectId: string; height: number }) {
   )
 }
 
-function Transport({ quality, onQuality }: { quality: Quality; onQuality: (q: Quality) => void }) {
+function Transport({
+  quality,
+  onQuality,
+  compact,
+}: {
+  quality: Quality
+  onQuality: (q: Quality) => void
+  compact: boolean
+}) {
   const playhead = useEditor((s) => s.playhead)
   const playing = useEditor((s) => s.playing)
   const settings = useEditor((s) => s.doc.settings)
@@ -288,13 +298,14 @@ function Transport({ quality, onQuality }: { quality: Quality; onQuality: (q: Qu
     setPlayhead(Math.max(0, (Math.round(playhead * fps) + n) / fps))
   }
   return (
-    <div className="flex h-11 shrink-0 items-center gap-1 border-t border-line bg-panel px-3">
-      <div className="tabular w-40 font-mono text-xs">
+    <div className={`flex shrink-0 items-center gap-1 border-t border-line bg-panel ${compact ? 'h-12 px-2' : 'h-11 px-3'}`}>
+      <div className={`tabular font-mono ${compact ? 'w-24 text-[11px] leading-tight' : 'w-40 text-xs'}`}>
         <span className="text-fg">{formatTimecode(playhead, fps)}</span>
-        <span className="text-faint"> / {formatTimecode(duration, fps)}</span>
+        {compact ? <br /> : ' '}
+        <span className="text-faint">{compact ? '' : '/ '}{formatTimecode(duration, fps)}</span>
       </div>
       <div className="flex flex-1 items-center justify-center gap-0.5">
-        <IconButton label="Go to start (Home)" onClick={() => setPlayhead(0)}>
+        <IconButton label="Go to start (Home)" onClick={() => setPlayhead(0)} className={compact ? 'hidden' : ''}>
           <SkipBack size={15} />
         </IconButton>
         <IconButton label="Previous frame (←)" onClick={() => step(-1)}>
@@ -302,7 +313,7 @@ function Transport({ quality, onQuality }: { quality: Quality; onQuality: (q: Qu
         </IconButton>
         <button
           onClick={() => setPlaying(!playing)}
-          className="mx-1 flex h-8 w-8 items-center justify-center rounded-full bg-fg text-bg transition-transform hover:scale-105 active:scale-95"
+          className="mx-1 flex h-9 w-9 items-center justify-center rounded-full bg-fg text-bg transition-transform hover:scale-105 active:scale-95"
           aria-label={playing ? 'Pause (Space)' : 'Play (Space)'}
           title={playing ? 'Pause (Space)' : 'Play (Space)'}
         >
@@ -311,11 +322,11 @@ function Transport({ quality, onQuality }: { quality: Quality; onQuality: (q: Qu
         <IconButton label="Next frame (→)" onClick={() => step(1)}>
           <StepForward size={15} />
         </IconButton>
-        <IconButton label="Go to end (End)" onClick={() => setPlayhead(duration)}>
+        <IconButton label="Go to end (End)" onClick={() => setPlayhead(duration)} className={compact ? 'hidden' : ''}>
           <SkipForward size={15} />
         </IconButton>
       </div>
-      <div className="flex w-40 items-center justify-end gap-2 text-xs text-muted">
+      <div className={`items-center justify-end gap-2 text-xs text-muted ${compact ? 'hidden' : 'flex w-40'}`}>
         <span className="hidden xl:inline">
           {settings.width}×{settings.height}
         </span>
@@ -350,6 +361,8 @@ function TransformOverlay({ width }: { width: number }) {
   const selection = useEditor((s) => s.selection)
   const playhead = useEditor((s) => s.playhead)
   const [guides, setGuides] = useState<{ v: boolean; h: boolean }>({ v: false, h: false })
+  const coarse = useMediaQuery('(pointer: coarse)')
+  const handle = coarse ? 22 : 10
   const drag = useRef<Drag | null>(null)
   const ref = useRef<HTMLDivElement>(null)
   const k = width / doc.settings.width
@@ -442,7 +455,7 @@ function TransformOverlay({ width }: { width: number }) {
   }
 
   return (
-    <div ref={ref} className="absolute inset-0 overflow-hidden" onPointerDown={onStageDown}>
+    <div ref={ref} className="absolute inset-0 touch-none overflow-hidden" onPointerDown={onStageDown}>
       {guides.v && <div className="pointer-events-none absolute top-0 bottom-0 left-1/2 w-px bg-accent-2/80" />}
       {guides.h && <div className="pointer-events-none absolute top-1/2 right-0 left-0 h-px bg-accent-2/80" />}
       {selected.map((l) => {
@@ -478,19 +491,21 @@ function TransformOverlay({ width }: { width: number }) {
                       scale: l.clip.transform.scale,
                     })
                   }}
-                  className="pointer-events-auto absolute h-2.5 w-2.5 rounded-sm border border-accent-2 bg-white"
+                  className={`pointer-events-auto absolute border border-accent-2 bg-white ${coarse ? 'rounded-full' : 'rounded-sm'}`}
                   style={{
-                    left: corner.endsWith('w') ? -5 : undefined,
-                    right: corner.endsWith('e') ? -5 : undefined,
-                    top: corner.startsWith('n') ? -5 : undefined,
-                    bottom: corner.startsWith('s') ? -5 : undefined,
+                    width: handle,
+                    height: handle,
+                    left: corner.endsWith('w') ? -handle / 2 : undefined,
+                    right: corner.endsWith('e') ? -handle / 2 : undefined,
+                    top: corner.startsWith('n') ? -handle / 2 : undefined,
+                    bottom: corner.startsWith('s') ? -handle / 2 : undefined,
                     cursor: corner === 'nw' || corner === 'se' ? 'nwse-resize' : 'nesw-resize',
                   }}
                 />
               ))}
             {selected.length === 1 && (
               <>
-                <div className="absolute -top-6 left-1/2 h-6 w-px bg-accent-2/70" />
+                <div className="absolute left-1/2 w-px bg-accent-2/70" style={{ top: -handle * 2, height: handle * 2 }} />
                 <div
                   title="Rotate (Shift snaps to 15°)"
                   onPointerDown={(e) => {
@@ -506,7 +521,8 @@ function TransformOverlay({ width }: { width: number }) {
                       rotation: l.clip.transform.rotation,
                     })
                   }}
-                  className="pointer-events-auto absolute -top-8 left-1/2 h-3 w-3 -translate-x-1/2 cursor-grab rounded-full border border-accent-2 bg-white"
+                  className="pointer-events-auto absolute left-1/2 -translate-x-1/2 cursor-grab rounded-full border border-accent-2 bg-white"
+                  style={{ top: -handle * 2 - handle / 2, width: handle, height: handle }}
                 />
               </>
             )}

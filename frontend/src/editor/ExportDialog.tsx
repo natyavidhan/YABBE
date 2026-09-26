@@ -66,7 +66,7 @@ export function ExportDialog({ projectId, onClose }: { projectId: string; onClos
   return (
     <Modal title="Export video" onClose={onClose} width="max-w-xl">
       <div className="flex flex-col gap-4">
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Resolution">
             <select
               className="h-8 rounded-md border border-line bg-bg px-2 text-fg outline-none focus:border-accent"
@@ -98,7 +98,7 @@ export function ExportDialog({ projectId, onClose }: { projectId: string; onClos
                 }`}
               >
                 <div className="text-sm font-medium">{q.label}</div>
-                <div className="mt-0.5 text-[11px] text-muted">{q.hint}</div>
+                <div className="mt-0.5 hidden text-[11px] text-muted sm:block">{q.hint}</div>
               </button>
             ))}
           </div>

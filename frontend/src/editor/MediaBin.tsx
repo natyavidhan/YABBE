@@ -10,7 +10,7 @@ import { useEditor } from './store'
 export const ASSET_MIME = 'application/x-yabbe-asset'
 const ACCEPT = 'video/*,audio/*,image/*,.mkv,.mov,.m4a,.flac,.opus,.webm'
 
-export function MediaBin({ projectId }: { projectId: string }) {
+export function MediaBin({ projectId, onAdded }: { projectId: string; onAdded?: () => void }) {
   const assets = useEditor((s) => s.assets)
   const uploads = useEditor((s) => s.uploads)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -55,9 +55,18 @@ export function MediaBin({ projectId }: { projectId: string }) {
   return (
     <>
       <div className="flex items-center justify-between border-b border-line px-3 py-2.5">
-        <h2 className="text-xs font-semibold tracking-wide text-muted uppercase">Media</h2>
-        <div className="flex gap-1">
-          <Button size="sm" variant="ghost" onClick={() => useEditor.getState().addTextClip()} title="Add text (T)">
+        {/* In the phone sheet the sheet itself carries the title. */}
+        {!onAdded && <h2 className="text-xs font-semibold tracking-wide text-muted uppercase">Media</h2>}
+        <div className={`flex gap-1 ${onAdded ? 'w-full justify-end' : ''}`}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              useEditor.getState().addTextClip()
+              onAdded?.()
+            }}
+            title="Add text (T)"
+          >
             <Type size={13} /> Text
           </Button>
           <Button size="sm" onClick={() => fileRef.current?.click()}>
@@ -111,13 +120,14 @@ export function MediaBin({ projectId }: { projectId: string }) {
             }`}
           >
             <Upload size={20} className="text-faint" />
-            <span className="font-medium">Drop videos, audio or photos</span>
-            <span className="text-xs text-muted">or click to browse</span>
+            <span className="font-medium pointer-coarse:hidden">Drop videos, audio or photos</span>
+            <span className="hidden font-medium pointer-coarse:inline">Add videos, audio or photos</span>
+            <span className="text-xs text-muted pointer-coarse:hidden">or click to browse</span>
           </button>
         ) : (
           <div className="grid grid-cols-2 gap-2">
             {shown.map((a) => (
-              <AssetCard key={a.id} projectId={projectId} asset={a} />
+              <AssetCard key={a.id} projectId={projectId} asset={a} onAdded={onAdded} />
             ))}
           </div>
         )}
@@ -155,7 +165,7 @@ const kindIcon = {
   image: <ImageIcon size={12} />,
 }
 
-function AssetCard({ projectId, asset }: { projectId: string; asset: Asset }) {
+function AssetCard({ projectId, asset, onAdded }: { projectId: string; asset: Asset; onAdded?: () => void }) {
   const [confirm, setConfirm] = useState(false)
   const used = useEditor((s) => s.doc.clips.filter((c) => c.asset_id === asset.id).length)
   const ready = asset.status === 'ready'
@@ -178,9 +188,12 @@ function AssetCard({ projectId, asset }: { projectId: string; asset: Asset }) {
         e.dataTransfer.setData(ASSET_MIME, asset.id)
         e.dataTransfer.effectAllowed = 'copy'
       }}
-      onDoubleClick={() => useEditor.getState().addAssetClip(asset)}
+      onDoubleClick={() => {
+        useEditor.getState().addAssetClip(asset)
+        onAdded?.()
+      }}
       className="group relative cursor-grab overflow-hidden rounded-lg border border-line bg-panel-2 transition-colors hover:border-line-strong active:cursor-grabbing"
-      title={`${asset.original_name}\n${asset.width ? `${asset.width}×${asset.height} · ` : ''}${formatBytes(asset.size)}\nDouble-click or drag to add`}
+      title={`${asset.original_name}\n${asset.width ? `${asset.width}×${asset.height} · ` : ''}${formatBytes(asset.size)}\nDouble-click, drag or press + to add`}
     >
       <div className="relative aspect-video bg-bg">
         {hasPoster ? (
@@ -202,12 +215,15 @@ function AssetCard({ projectId, asset }: { projectId: string; asset: Asset }) {
           </span>
         )}
         {used > 0 && <span className="absolute top-1 left-1 h-1.5 w-1.5 rounded-full bg-accent" title="Used in timeline" />}
-        <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="absolute top-1 right-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 pointer-coarse:opacity-100">
           {asset.status !== 'error' && (
             <IconButton
               label="Add at playhead"
-              className="h-6! w-6! bg-black/70"
-              onClick={() => useEditor.getState().addAssetClip(asset)}
+              className="h-6! w-6! bg-black/70 pointer-coarse:h-8! pointer-coarse:w-8!"
+              onClick={() => {
+                useEditor.getState().addAssetClip(asset)
+                onAdded?.()
+              }}
             >
               <Plus size={13} />
             </IconButton>
@@ -215,7 +231,7 @@ function AssetCard({ projectId, asset }: { projectId: string; asset: Asset }) {
           {asset.status === 'error' && (
             <IconButton
               label="Retry processing"
-              className="h-6! w-6! bg-black/70"
+              className="h-6! w-6! bg-black/70 pointer-coarse:h-8! pointer-coarse:w-8!"
               onClick={async () => {
                 try {
                   const a = await api.reprocessAsset(projectId, asset.id)
@@ -229,7 +245,7 @@ function AssetCard({ projectId, asset }: { projectId: string; asset: Asset }) {
               <RotateCw size={12} />
             </IconButton>
           )}
-          <IconButton label="Delete media" className="h-6! w-6! bg-black/70" onClick={() => (used ? setConfirm(true) : remove())}>
+          <IconButton label="Delete media" className="h-6! w-6! bg-black/70 pointer-coarse:h-8! pointer-coarse:w-8!" onClick={() => (used ? setConfirm(true) : remove())}>
             <Trash2 size={12} />
           </IconButton>
         </div>

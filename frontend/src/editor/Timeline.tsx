@@ -19,12 +19,15 @@ import {
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { Asset, Clip, Track } from '../api/types'
-import { IconButton } from '../components/ui'
+import { Button, IconButton, Modal, inputClass } from '../components/ui'
 import { clamp } from '../lib/format'
+import { isTouchEvent, useIsMobile } from '../lib/useMedia'
 import { ASSET_MIME } from './MediaBin'
 import { clipEnd, docDuration, maxClipDuration, MIN_CLIP, overlaps, useEditor } from './store'
 
 const HEADER_W = 176
+const HEADER_W_COMPACT = 104
+const LONG_PRESS_MS = 450
 const RULER_H = 28
 const TRACK_H = { video: 64, audio: 52 } as const
 const SNAP_PX = 8
@@ -52,9 +55,13 @@ export function Timeline({ projectId }: { projectId: string }) {
   const [view, setView] = useState({ left: 0, width: 1000 })
   const drag = useRef<DragState | null>(null)
   const [snapLine, setSnapLine] = useState<number | null>(null)
+  const compact = useIsMobile()
+  const headerW = compact ? HEADER_W_COMPACT : HEADER_W
+  const headerRef = useRef(headerW)
+  headerRef.current = headerW
 
   const assetMap = useMemo(() => new Map<string, Asset>(assets.map((a) => [a.id, a])), [assets])
-  const contentSeconds = Math.max(duration + 30, (view.width - HEADER_W) / zoom)
+  const contentSeconds = Math.max(duration + 30, (view.width - headerW) / zoom)
   const contentWidth = contentSeconds * zoom
 
   useEffect(() => {
@@ -80,16 +87,53 @@ export function Timeline({ projectId }: { projectId: string }) {
       e.preventDefault()
       const s = useEditor.getState()
       const rect = el.getBoundingClientRect()
-      const x = e.clientX - rect.left - HEADER_W + el.scrollLeft
+      const x = e.clientX - rect.left - headerRef.current + el.scrollLeft
       const t = x / s.zoom
       const next = clamp(s.zoom * Math.pow(1.0015, -e.deltaY), 4, 800)
       s.setZoom(next)
       requestAnimationFrame(() => {
-        el.scrollLeft = t * next - (e.clientX - rect.left - HEADER_W)
+        el.scrollLeft = t * next - (e.clientX - rect.left - headerRef.current)
       })
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => el.removeEventListener('wheel', onWheel)
+  }, [])
+
+  // Two-finger pinch zooms the timeline around the fingers' midpoint.
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    let pinch: { dist: number; zoom: number } | null = null
+    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY)
+    const start = (e: TouchEvent) => {
+      if (e.touches.length === 2) pinch = { dist: dist(e.touches), zoom: useEditor.getState().zoom }
+    }
+    const move = (e: TouchEvent) => {
+      if (!pinch || e.touches.length !== 2) return
+      e.preventDefault()
+      const rect = el.getBoundingClientRect()
+      const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2 - rect.left - headerRef.current
+      const s = useEditor.getState()
+      const t = (midX + el.scrollLeft) / s.zoom
+      const next = clamp((pinch.zoom * dist(e.touches)) / pinch.dist, 4, 800)
+      s.setZoom(next)
+      requestAnimationFrame(() => {
+        el.scrollLeft = t * next - midX
+      })
+    }
+    const end = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinch = null
+    }
+    el.addEventListener('touchstart', start, { passive: true })
+    el.addEventListener('touchmove', move, { passive: false })
+    el.addEventListener('touchend', end)
+    el.addEventListener('touchcancel', end)
+    return () => {
+      el.removeEventListener('touchstart', start)
+      el.removeEventListener('touchmove', move)
+      el.removeEventListener('touchend', end)
+      el.removeEventListener('touchcancel', end)
+    }
   }, [])
 
   // Follow the playhead while playing.
@@ -99,7 +143,7 @@ export function Timeline({ projectId }: { projectId: string }) {
         const el = scrollRef.current
         if (!el || !s.playing || s.playhead === prev.playhead) return
         const x = s.playhead * s.zoom
-        const visibleW = el.clientWidth - HEADER_W
+        const visibleW = el.clientWidth - headerRef.current
         if (x > el.scrollLeft + visibleW - 40 || x < el.scrollLeft) el.scrollLeft = Math.max(0, x - 80)
       }),
     [],
@@ -108,7 +152,7 @@ export function Timeline({ projectId }: { projectId: string }) {
   const timeAt = useCallback((clientX: number) => {
     const el = scrollRef.current!
     const rect = el.getBoundingClientRect()
-    return Math.max(0, (clientX - rect.left - HEADER_W + el.scrollLeft) / useEditor.getState().zoom)
+    return Math.max(0, (clientX - rect.left - headerRef.current + el.scrollLeft) / useEditor.getState().zoom)
   }, [])
 
   const trackAt = useCallback(
@@ -225,7 +269,9 @@ export function Timeline({ projectId }: { projectId: string }) {
   )
 
   const onUp = useCallback(() => {
-    if (drag.current?.active) useEditor.getState().endGesture()
+    const d = drag.current
+    if (d?.active) useEditor.getState().endGesture()
+    else if (d?.kind === 'move' && d.originals.size > 1) useEditor.getState().select([d.primary])
     drag.current = null
     setSnapLine(null)
     window.removeEventListener('pointermove', onMove)
@@ -247,6 +293,51 @@ export function Timeline({ projectId }: { projectId: string }) {
     const track = s.doc.tracks.find((t) => t.id === clip.track_id)
     if (e.shiftKey) {
       s.toggleSelect(clip.id)
+      return
+    }
+    if (isTouchEvent(e) && part === 'body') {
+      // Touch: tap selects, long-press toggles multi-selection, and only an
+      // already-selected clip can be dragged (so swiping over clips scrolls).
+      const wasSelected = s.selection.includes(clip.id)
+      const startX = e.clientX
+      const startY = e.clientY
+      let moved = false
+      let longPressed = false
+      const timer = window.setTimeout(() => {
+        if (moved) return
+        longPressed = true
+        if (drag.current) {
+          drag.current = null
+          window.removeEventListener('pointermove', onMove)
+          window.removeEventListener('pointerup', onUp)
+        }
+        useEditor.getState().toggleSelect(clip.id)
+        navigator.vibrate?.(15)
+      }, LONG_PRESS_MS)
+      const watch = (ev: PointerEvent) => {
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > 8) moved = true
+      }
+      const finish = (ev: PointerEvent) => {
+        if (ev.type === 'pointercancel') moved = true // the browser took over (scroll)
+        window.clearTimeout(timer)
+        window.removeEventListener('pointermove', watch)
+        window.removeEventListener('pointerup', finish)
+        window.removeEventListener('pointercancel', finish)
+        const st = useEditor.getState()
+        if (!moved && !longPressed && (!wasSelected || st.selection.length > 1) && !drag.current?.active)
+          st.select([clip.id])
+      }
+      window.addEventListener('pointermove', watch)
+      window.addEventListener('pointerup', finish)
+      window.addEventListener('pointercancel', finish)
+      if (!wasSelected || track?.locked) return
+      const lockedTracks = new Set(s.doc.tracks.filter((t) => t.locked).map((t) => t.id))
+      const originals = new Map(
+        s.doc.clips
+          .filter((c) => s.selection.includes(c.id) && !lockedTracks.has(c.track_id))
+          .map((c) => [c.id, { start: c.start, track_id: c.track_id }]),
+      )
+      beginDrag({ kind: 'move', primary: clip.id, startX: e.clientX, startY: e.clientY, originals, active: false })
       return
     }
     let sel = s.selection
@@ -282,10 +373,18 @@ export function Timeline({ projectId }: { projectId: string }) {
     window.addEventListener('pointerup', up)
   }
 
+  const lastLanePointer = useRef('mouse')
   const onLaneDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) return
+    lastLanePointer.current = e.pointerType
+    if (e.button !== 0 || isTouchEvent(e)) return // touch: handled as a tap in onLaneClick
     if (!e.shiftKey) useEditor.getState().select([])
     scrub(e)
+  }
+  const onLaneClick = (e: React.MouseEvent) => {
+    if (lastLanePointer.current === 'mouse' || e.target !== e.currentTarget) return
+    const s = useEditor.getState()
+    s.select([])
+    s.setPlayhead(timeAt(e.clientX))
   }
 
   const onDrop = (e: React.DragEvent, track: Track) => {
@@ -307,13 +406,13 @@ export function Timeline({ projectId }: { projectId: string }) {
 
   return (
     <div className="flex h-full flex-col bg-panel">
-      <Toolbar />
-      <div ref={scrollRef} className="relative min-h-0 flex-1 overflow-auto">
-        <div className="relative" style={{ width: HEADER_W + contentWidth, minHeight: '100%' }}>
+      <Toolbar compact={compact} />
+      <div ref={scrollRef} className="relative min-h-0 flex-1 touch-pan-x touch-pan-y overflow-auto overscroll-contain">
+        <div className="relative" style={{ width: headerW + contentWidth, minHeight: '100%' }}>
           {/* Ruler */}
           <div className="sticky top-0 z-20 flex" style={{ height: RULER_H }}>
-            <div className="sticky left-0 z-30 shrink-0 border-r border-b border-line bg-panel" style={{ width: HEADER_W }} />
-            <div className="relative flex-1 cursor-text border-b border-line bg-panel-2" onPointerDown={scrub}>
+            <div className="sticky left-0 z-30 shrink-0 border-r border-b border-line bg-panel" style={{ width: headerW }} />
+            <div className="relative flex-1 cursor-text touch-none border-b border-line bg-panel-2" onPointerDown={scrub}>
               <Ruler zoom={zoom} from={visible.from} to={visible.to} />
             </div>
           </div>
@@ -322,12 +421,13 @@ export function Timeline({ projectId }: { projectId: string }) {
           <div ref={lanesRef}>
             {tracks.map((track, i) => (
               <div key={track.id} className="flex" style={{ height: TRACK_H[track.kind] }}>
-                <TrackHeader track={track} index={i} count={tracks.length} />
+                <TrackHeader track={track} index={i} count={tracks.length} width={headerW} compact={compact} />
                 <div
                   className={`relative flex-1 border-b border-line ${track.kind === 'audio' ? 'bg-[#13161b]' : 'bg-bg'} ${
                     track.hidden || track.muted ? 'opacity-50' : ''
                   }`}
                   onPointerDown={onLaneDown}
+                  onClick={onLaneClick}
                   onDragOver={(e) => {
                     if (e.dataTransfer.types.includes(ASSET_MIME)) {
                       e.preventDefault()
@@ -349,6 +449,7 @@ export function Timeline({ projectId }: { projectId: string }) {
                         selected={selection.includes(c.id)}
                         locked={track.locked}
                         onDown={onClipDown}
+                        compact={compact}
                       />
                     ))}
                 </div>
@@ -362,21 +463,21 @@ export function Timeline({ projectId }: { projectId: string }) {
           {snapLine !== null && (
             <div
               className="pointer-events-none absolute top-0 bottom-0 z-10 w-px bg-warn"
-              style={{ left: HEADER_W + snapLine * zoom }}
+              style={{ left: headerW + snapLine * zoom }}
             />
           )}
-          <Playhead />
+          <Playhead headerW={headerW} />
         </div>
       </div>
     </div>
   )
 }
 
-function Playhead() {
+function Playhead({ headerW }: { headerW: number }) {
   const playhead = useEditor((s) => s.playhead)
   const zoom = useEditor((s) => s.zoom)
   return (
-    <div className="pointer-events-none absolute top-0 bottom-0 z-20" style={{ left: HEADER_W + playhead * zoom }}>
+    <div className="pointer-events-none absolute top-0 bottom-0 z-20" style={{ left: headerW + playhead * zoom }}>
       <div className="sticky top-0 -ml-[6px] h-0 w-0 border-x-[6px] border-t-[9px] border-x-transparent border-t-danger" style={{ top: RULER_H - 9 }} />
       <div className="absolute top-0 bottom-0 w-px -translate-x-1/2 bg-danger" />
     </div>
@@ -418,17 +519,32 @@ function Ruler({ zoom, from, to }: { zoom: number; from: number; to: number }) {
   )
 }
 
-function TrackHeader({ track, index, count }: { track: Track; index: number; count: number }) {
+function TrackHeader({
+  track,
+  index,
+  count,
+  width,
+  compact,
+}: {
+  track: Track
+  index: number
+  count: number
+  width: number
+  compact: boolean
+}) {
   const { updateTrack, removeTrack, moveTrack } = useEditor.getState()
   const [editing, setEditing] = useState(false)
+  const [menu, setMenu] = useState(false)
   const hasClips = useEditor((s) => s.doc.clips.some((c) => c.track_id === track.id))
   const neighbours = useEditor((s) => s.doc.tracks)
   const canUp = index > 0 && neighbours[index - 1]?.kind === track.kind
   const canDown = index < count - 1 && neighbours[index + 1]?.kind === track.kind
   return (
     <div
-      className="group sticky left-0 z-10 flex shrink-0 flex-col justify-center gap-1 border-r border-b border-line bg-panel px-2.5"
-      style={{ width: HEADER_W }}
+      className={`group sticky left-0 z-10 flex shrink-0 flex-col justify-center gap-1 border-r border-b border-line bg-panel ${
+        compact ? 'px-1.5' : 'px-2.5'
+      }`}
+      style={{ width }}
     >
       <div className="flex items-center gap-1.5">
         <span className={`h-2 w-2 shrink-0 rounded-full ${track.kind === 'audio' ? 'bg-clip-audio' : 'bg-clip-video'}`} />
@@ -447,7 +563,12 @@ function TrackHeader({ track, index, count }: { track: Track; index: number; cou
             }}
           />
         ) : (
-          <span className="truncate text-xs font-medium" onDoubleClick={() => setEditing(true)} title="Double-click to rename">
+          <span
+            className="truncate text-xs font-medium"
+            onDoubleClick={() => setEditing(true)}
+            onClick={() => compact && setMenu(true)}
+            title={compact ? 'Tap for track options' : 'Double-click to rename'}
+          >
             {track.name}
           </span>
         )}
@@ -465,7 +586,7 @@ function TrackHeader({ track, index, count }: { track: Track; index: number; cou
           {track.locked ? <Lock size={13} /> : <Unlock size={13} />}
         </IconButton>
         <div className="flex-1" />
-        <div className="flex opacity-0 transition-opacity group-hover:opacity-100">
+        <div className={`${compact ? 'hidden' : 'flex'} opacity-0 transition-opacity group-hover:opacity-100`}>
           <IconButton label="Move track up" disabled={!canUp} onClick={() => moveTrack(track.id, -1)} className="h-6! w-5!">
             <ChevronUp size={13} />
           </IconButton>
@@ -483,17 +604,48 @@ function TrackHeader({ track, index, count }: { track: Track; index: number; cou
           </IconButton>
         </div>
       </div>
+      {menu && (
+        <Modal title="Track" onClose={() => setMenu(false)}>
+          <div className="flex flex-col gap-3">
+            <input
+              className={inputClass}
+              defaultValue={track.name}
+              aria-label="Track name"
+              onBlur={(e) => e.target.value.trim() && updateTrack(track.id, { name: e.target.value.trim() })}
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <Button disabled={!canUp} onClick={() => moveTrack(track.id, -1)}>
+                <ChevronUp size={15} /> Move up
+              </Button>
+              <Button disabled={!canDown} onClick={() => moveTrack(track.id, 1)}>
+                <ChevronDown size={15} /> Move down
+              </Button>
+            </div>
+            <Button
+              variant="danger"
+              onClick={() => {
+                if (!hasClips || window.confirm(`Delete “${track.name}” and all clips on it?`)) {
+                  removeTrack(track.id)
+                  setMenu(false)
+                }
+              }}
+            >
+              <Trash2 size={15} /> Delete track{hasClips ? ' and its clips' : ''}
+            </Button>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
 
-function Toolbar() {
+function Toolbar({ compact }: { compact: boolean }) {
   const zoom = useEditor((s) => s.zoom)
   const snapping = useEditor((s) => s.snapping)
   const hasSelection = useEditor((s) => s.selection.length > 0)
   const s = useEditor.getState()
   return (
-    <div className="flex h-10 shrink-0 items-center gap-1 border-b border-line px-2">
+    <div className="flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line px-2">
       <IconButton label="Split at playhead (S)" onClick={s.splitAtPlayhead}>
         <Scissors size={15} />
       </IconButton>
@@ -504,20 +656,24 @@ function Toolbar() {
         <Trash2 size={15} />
       </IconButton>
       <div className="mx-1 h-5 w-px bg-line" />
-      <IconButton label="Add text (T)" onClick={() => s.addTextClip()}>
-        <Type size={15} />
-      </IconButton>
+      {!compact && (
+        <IconButton label="Add text (T)" onClick={() => s.addTextClip()}>
+          <Type size={15} />
+        </IconButton>
+      )}
       <button
         onClick={() => s.addTrack('video')}
-        className="flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted hover:bg-raised hover:text-fg"
+        className="flex h-7 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap text-muted hover:bg-raised hover:text-fg"
+        title="Add video track"
       >
-        <Plus size={13} /> Video track
+        <Plus size={13} /> {compact ? 'Video' : 'Video track'}
       </button>
       <button
         onClick={() => s.addTrack('audio')}
-        className="flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted hover:bg-raised hover:text-fg"
+        className="flex h-7 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap text-muted hover:bg-raised hover:text-fg"
+        title="Add audio track"
       >
-        <Plus size={13} /> Audio track
+        <Plus size={13} /> {compact ? 'Audio' : 'Audio track'}
       </button>
       <div className="flex-1" />
       <IconButton label={snapping ? 'Snapping on' : 'Snapping off'} active={snapping} onClick={() => s.setSnapping(!snapping)}>
@@ -534,7 +690,7 @@ function Toolbar() {
         step={0.001}
         value={Math.log(zoom / 4) / Math.log(200)}
         onChange={(e) => s.setZoom(4 * Math.pow(200, Number(e.target.value)))}
-        className="w-28"
+        className={compact ? 'hidden' : 'w-28'}
         aria-label="Timeline zoom"
       />
       <IconButton label="Zoom in (+)" onClick={() => s.setZoom(zoom * 1.25)}>
@@ -562,6 +718,7 @@ const TimelineClip = memo(function TimelineClip({
   selected,
   locked,
   onDown,
+  compact,
 }: {
   projectId: string
   clip: Clip
@@ -571,6 +728,7 @@ const TimelineClip = memo(function TimelineClip({
   selected: boolean
   locked: boolean
   onDown: (e: React.PointerEvent, clip: Clip, part: 'body' | 'start' | 'end') => void
+  compact: boolean
 }) {
   const left = clip.start * zoom
   const width = Math.max(2, clip.duration * zoom)
@@ -586,7 +744,8 @@ const TimelineClip = memo(function TimelineClip({
       className={`absolute top-0.5 overflow-hidden rounded-md border ${CLIP_COLORS[clip.type]} ${
         selected ? 'z-[5] ring-2 ring-white/90' : ''
       } ${locked ? 'cursor-not-allowed' : 'cursor-grab active:cursor-grabbing'} ${!asset && clip.type !== 'text' ? 'opacity-50' : ''}`}
-      style={{ left, width, height: height - 4 }}
+      // Selected clips capture touch (drag to move); others let the timeline scroll.
+      style={{ left, width, height: height - 4, touchAction: selected ? 'none' : 'pan-x pan-y' }}
       onPointerDown={(e) => onDown(e, clip, 'body')}
       title={label}
     >
@@ -621,7 +780,7 @@ const TimelineClip = memo(function TimelineClip({
           style={{ width: clip.fade_out * zoom }}
         />
       )}
-      {!locked && (
+      {!locked && !compact && (
         <>
           <div
             className="absolute top-0 left-0 z-[2] h-full w-2 cursor-ew-resize hover:bg-white/40"
@@ -631,6 +790,23 @@ const TimelineClip = memo(function TimelineClip({
             className="absolute top-0 right-0 z-[2] h-full w-2 cursor-ew-resize hover:bg-white/40"
             onPointerDown={(e) => onDown(e, clip, 'end')}
           />
+        </>
+      )}
+      {!locked && compact && selected && (
+        <>
+          {/* Finger-sized trim grips, only on the selected clip. */}
+          <div
+            className="absolute top-0 left-0 z-[2] flex h-full w-5 touch-none items-center justify-center bg-white/25"
+            onPointerDown={(e) => onDown(e, clip, 'start')}
+          >
+            <div className="h-1/2 w-1 rounded-full bg-white" />
+          </div>
+          <div
+            className="absolute top-0 right-0 z-[2] flex h-full w-5 touch-none items-center justify-center bg-white/25"
+            onPointerDown={(e) => onDown(e, clip, 'end')}
+          >
+            <div className="h-1/2 w-1 rounded-full bg-white" />
+          </div>
         </>
       )}
     </div>
