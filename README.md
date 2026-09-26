@@ -70,6 +70,14 @@ videos can be uploaded.
   breadcrumb leads back. Like After Effects precomps, a nested sequence's
   background is transparent, so only its content covers what's underneath.
   A sequence can never end up inside itself.
+  **Pre-rendering:** a nested sequence is normally rendered live for the part
+  the parent needs. Pre-render it (sequence menu → *Pre-render* draft 480p /
+  720p / full quality) and parents play from that file while nothing inside
+  it has changed. Drafts of nested sequences are made automatically a few
+  seconds after you stop editing (toggle in the **Renders** panel, top bar),
+  and exports make full-quality pre-renders of nested sequences first, deepest
+  first. Badges on sequences and nested clips show fresh / out of date /
+  rendering; the Renders panel shows progress, cancels, and frees disk space.
 * **Timeline** — multiple video (layer) and audio tracks; move clips between
   tracks, trim either edge, split, duplicate, snapping, zoom, mute / hide /
   lock tracks, undo / redo.
@@ -173,6 +181,8 @@ from `backend/` — it serves the built UI from `frontend/dist` on the same port
 | `YABBE_PREVIEW_HEIGHT` | `480` | Default preview resolution |
 | `YABBE_PROXY_HEIGHT` | `540` | Proxy (editing copy) resolution |
 | `YABBE_JOB_WORKERS` | `2` | Parallel background jobs (proxies, exports) |
+| `YABBE_AUTO_PRERENDER` | `1` | `0` turns off automatic draft pre-renders of nested sequences everywhere |
+| `YABBE_NESTED_CACHE_MB` | `4096` | Disk budget for live renders of nested sequence ranges |
 | `YABBE_PREVIEW_WORKERS` | `2` | Parallel preview segment renders |
 | `YABBE_STATIC_DIR` | `frontend/dist` | Built UI served by the backend |
 | `PUID` / `PGID` | `1000` | (Docker) user/group that owns `/data` |

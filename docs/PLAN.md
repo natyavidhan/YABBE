@@ -130,7 +130,7 @@ Ops
 - [x] Phase 2 — nesting sequences inside sequences (hybrid live/cached
       rendering, transparent nested backgrounds, cycle checks, audio,
       open-from-clip, breadcrumbs)
-- [ ] Phase 3 — pre-rendering (draft/preview/full, auto draft in background,
+- [x] Phase 3 — pre-rendering (draft/preview/full, auto draft in background,
       status badges, render queue, export renders dependencies first)
 - [ ] Phase 4 — pre-compose / un-nest, thumbnails, mobile polish
 

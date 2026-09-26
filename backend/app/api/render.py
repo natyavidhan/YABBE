@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, Response
 from pydantic import BaseModel, Field
 
 from .. import storage
-from ..engine import ffmpeg, render, text
+from ..engine import ffmpeg, prerender, render, text
 from ..jobs import Job, jobs
 from ..models import Project, TextStyle, TimelineUpdate
 from .deps import get_project
@@ -145,6 +145,37 @@ def download_export(project_id: str, export_id: str):
     if not path.is_file():
         raise HTTPException(404, "Export file missing")
     return FileResponse(path, media_type="video/mp4", filename=rec.filename)
+
+
+# -- pre-renders -----------------------------------------------------------------------
+
+
+@router.get("/projects/{project_id}/prerenders", response_model=list[prerender.SequenceStatus])
+def prerender_status(project_id: str):
+    return prerender.status(get_project(project_id))
+
+
+class PrerenderRequest(BaseModel):
+    quality: prerender.Quality = "draft"
+
+
+@router.post("/projects/{project_id}/sequences/{sequence_id}/prerender", response_model=Optional[Job])
+def start_prerender(project_id: str, sequence_id: str, body: PrerenderRequest):
+    """Queue a pre-render (null when it's already up to date)."""
+    project = get_project(project_id)
+    seq = project.sequence(sequence_id)
+    if seq is None:
+        raise HTTPException(404, "Sequence not found")
+    if seq.duration <= 0:
+        raise HTTPException(400, "The sequence is empty")
+    return prerender.start(project_id, sequence_id, body.quality)
+
+
+@router.delete("/projects/{project_id}/sequences/{sequence_id}/prerender")
+def clear_prerender(project_id: str, sequence_id: str, quality: Optional[prerender.Quality] = None):
+    get_project(project_id)
+    prerender.clear(project_id, sequence_id, quality)
+    return {"ok": True}
 
 
 # -- jobs ------------------------------------------------------------------------------

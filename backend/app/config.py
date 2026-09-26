@@ -41,6 +41,10 @@ PREVIEW_SEGMENT_SECONDS = 2.0
 
 # Concurrency
 JOB_WORKERS = int(os.environ.get("YABBE_JOB_WORKERS", "2"))
+# Make draft pre-renders of nested sequences in the background after edits.
+AUTO_PRERENDER = os.environ.get("YABBE_AUTO_PRERENDER", "1") not in ("0", "false", "no")
+# Size limit for on-demand renders of nested sequence ranges (all projects).
+NESTED_CACHE_MB = int(os.environ.get("YABBE_NESTED_CACHE_MB", "4096"))
 PREVIEW_WORKERS = int(os.environ.get("YABBE_PREVIEW_WORKERS", "2"))
 
 CORS_ORIGINS = [o for o in os.environ.get("YABBE_CORS_ORIGINS", "*").split(",") if o]

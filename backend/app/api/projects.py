@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
 from .. import config, storage
-from ..engine import render
+from ..engine import prerender, render
 from ..jobs import jobs
 from ..models import Project, ProjectSummary, Sequence, TimelineUpdate, new_id
 from .deps import get_project
@@ -120,6 +120,8 @@ def save_project(project_id: str, body: TimelineUpdate):
         asset_ids = {a.id for a in p.assets}
         if body.name is not None:
             p.name = body.name.strip() or p.name
+        if body.auto_prerender is not None:
+            p.auto_prerender = body.auto_prerender
         if body.sequences is not None and body.sequences:
             seq_ids = {x.id for x in body.sequences}
             p.sequences = [sanitize_sequence(x, asset_ids, seq_ids) for x in body.sequences]
@@ -143,6 +145,8 @@ def save_project(project_id: str, body: TimelineUpdate):
         return p
 
     project = storage.update(project_id, apply)
+    if changed_timeline or body.auto_prerender:
+        prerender.project_saved(project)
     if changed_timeline:
         refresh_thumbnail(project_id)
     return project
@@ -164,7 +168,7 @@ def duplicate_project(project_id: str):
     copy.name = f"{src.name} (copy)"
     copy.created_at = copy.updated_at = time.time()
     shutil.copytree(storage.project_dir(src.id), storage.project_dir(copy.id),
-                    ignore=shutil.ignore_patterns("exports", "*.part*"))
+                    ignore=shutil.ignore_patterns("exports", "nested", "prerender", "*.part*"))
     storage.save(copy, touch=False)
     return copy
 

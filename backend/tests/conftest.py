@@ -31,6 +31,7 @@ def client(tmp_path_factory, media_dir):
     import os
     os.environ["YABBE_DATA_DIR"] = str(tmp_path_factory.mktemp("data"))
     os.environ["YABBE_STATIC_DIR"] = str(tmp_path_factory.mktemp("nostatic") / "none")
+    os.environ["YABBE_AUTO_PRERENDER"] = "0"  # tests that want it turn it on
     from app.main import app
     with TestClient(app) as c:
         yield c

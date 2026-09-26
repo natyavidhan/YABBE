@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from .. import config, storage
 from ..jobs import JobContext
 from ..models import Project, new_id
-from . import compositor, ffmpeg
+from . import compositor, ffmpeg, prerender
 
 # --------------------------------------------------------------------------- helpers
 
@@ -281,8 +281,18 @@ def run_export(ctx: JobContext, project: Project, options: ExportOptions, record
     out = storage.exports_dir(project.id) / record.filename
     tmp = out.with_name(out.stem + ".part.mp4")
     try:
+        # Nested sequences first (deepest first), so the export itself only reads
+        # finished files and its progress bar means something.
+        span = 0.0
+        if prerender.dependencies(project, project.main_sequence_id):
+            deps = [project.sequence(s) for s in prerender.dependencies(project, project.main_sequence_id)]
+            work = sum(s.duration for s in deps if s) or 0.0
+            span = min(0.8, work / (work + duration))
+            quality = "preview" if options.height and options.height <= 720 else "full"
+            prerender.render_with_dependencies(project, project.main_sequence_id, quality, ctx,
+                                               span=(0.0, span), include_self=False)
         g = compositor.build(project, compositor.Window(0.0, duration, scale=k, use_proxies=False))
-        ctx.progress(0.0, "Rendering")
+        ctx.progress(span, "Rendering")
         ffmpeg.run_with_progress(
             [
                 "-y", *g.args(),
@@ -293,7 +303,7 @@ def run_export(ctx: JobContext, project: Project, options: ExportOptions, record
                 "-t", f"{duration:.6f}", "-movflags", "+faststart", "-f", "mp4", str(tmp),
             ],
             duration,
-            lambda p: ctx.progress(p * 0.99),
+            lambda p: ctx.progress(span + (0.99 - span) * p),
             lambda: ctx.cancelled,
         )
         if ctx.cancelled:

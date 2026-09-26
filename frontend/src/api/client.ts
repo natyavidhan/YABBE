@@ -3,10 +3,12 @@ import type {
   ExportRecord,
   Job,
   PreviewSession,
+  PrerenderQuality,
   Project,
   ProjectSettings,
   ProjectSummary,
   Quality,
+  SequenceRenderStatus,
   TextStyle,
   Timeline,
   TransitionCatalog,
@@ -109,6 +111,18 @@ export const api = {
   preview: (id: string, height: number, timeline: Timeline) =>
     request<PreviewSession>('POST', `${p(id)}/preview`, { height, timeline }),
   playlistUrl: (key: string) => `/api/preview/${key}/index.m3u8`,
+
+  setAutoPrerender: (id: string, on: boolean) => request<Project>('PUT', p(id), { auto_prerender: on }),
+
+  // pre-renders
+  prerenders: (id: string) => request<SequenceRenderStatus[]>('GET', `${p(id)}/prerenders`),
+  startPrerender: (id: string, sequenceId: string, quality: PrerenderQuality) =>
+    request<Job | null>('POST', `${p(id)}/sequences/${encodeURIComponent(sequenceId)}/prerender`, { quality }),
+  clearPrerender: (id: string, sequenceId: string, quality?: PrerenderQuality) =>
+    request<{ ok: boolean }>(
+      'DELETE',
+      `${p(id)}/sequences/${encodeURIComponent(sequenceId)}/prerender${quality ? `?quality=${quality}` : ''}`,
+    ),
 
   // exports
   listExports: (id: string) => request<ExportRecord[]>('GET', `${p(id)}/exports`),

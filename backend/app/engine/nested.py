@@ -18,7 +18,7 @@ import threading
 from pathlib import Path
 from typing import NamedTuple, Optional
 
-from .. import config
+from .. import storage
 from ..models import Project
 from . import ffmpeg
 
@@ -66,7 +66,7 @@ def has_audio(project: Project, sequence_id: str, _stack: tuple[str, ...] = ()) 
 
 
 def _cache_dir(project_id: str) -> Path:
-    d = config.DATA_DIR / "cache" / "nested" / project_id
+    d = storage.cache_dir(project_id) / "nested"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

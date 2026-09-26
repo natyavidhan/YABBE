@@ -16,6 +16,7 @@ import { Timeline } from '../editor/Timeline'
 import { Viewer } from '../editor/Viewer'
 import { GraphEditor } from '../editor/graph/GraphEditor'
 import { SequencesPanel, SequenceTabs } from '../editor/Sequences'
+import { RenderQueueButton, useRenderPolling, useRenders } from '../editor/Renders'
 
 export default function Editor() {
   const { projectId = '' } = useParams()
@@ -30,6 +31,7 @@ export default function Editor() {
       .then((p) => {
         if (!alive) return
         useEditor.getState().load(p)
+        useRenders.setState({ projectId: p.id, status: {}, jobs: [], auto: p.auto_prerender ?? true })
         setStatus('ready')
       })
       .catch((e) => {
@@ -70,6 +72,7 @@ function EditorShell({ projectId }: { projectId: string }) {
   useAssetPolling(projectId)
   useTextMeasurements()
   useShortcuts()
+  useRenderPolling(projectId)
 
   const name = useEditor((s) => s.doc.name)
   const mobile = useIsMobile()
@@ -135,6 +138,7 @@ function EditorShell({ projectId }: { projectId: string }) {
         <div className="flex-1" />
         <UndoRedo />
         <div className="mx-1 h-5 w-px bg-line" />
+        <RenderQueueButton />
         <IconButton label="Keyboard shortcuts" onClick={() => setHelpOpen(true)}>
           <Keyboard size={16} />
         </IconButton>
@@ -333,6 +337,7 @@ function MobileEditor({
         <ProjectName className="min-w-0 flex-1" />
         <SaveIndicator compact />
         <UndoRedo />
+        <RenderQueueButton />
         <Button variant="primary" size="sm" className="ml-1 h-8" onClick={onExport} aria-label="Export">
           <Download size={14} />
         </Button>

@@ -294,6 +294,7 @@ class Project(_Model):
     assets: list[Asset] = Field(default_factory=list)
     sequences: list[Sequence] = Field(default_factory=list)
     main_sequence_id: str = ""
+    auto_prerender: bool = True  # draft pre-renders of nested sequences after edits
 
     @model_validator(mode="before")
     @classmethod
@@ -405,6 +406,7 @@ class TimelineUpdate(_Model):
     overwritten from the client (they are only created by uploads)."""
 
     name: Optional[str] = None
+    auto_prerender: Optional[bool] = None
     sequences: Optional[list[Sequence]] = None
     main_sequence_id: Optional[str] = None
     # A single timeline's contents (older clients, and unsaved editor state

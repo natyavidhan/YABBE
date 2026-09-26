@@ -37,6 +37,7 @@ import { isTouchEvent, useIsMobile } from '../lib/useMedia'
 import { allKeyTimes, shiftKeyframes, shiftMarkers, visibleMarkers } from './keyframes'
 import { ASSET_MIME } from './MediaBin'
 import { allMarkers, assetKey, assetsWithSequences, clipEnd, cuts, docDuration, maxClipDuration, MIN_CLIP, overlaps, transitionLength, useEditor, withLinked } from './store'
+import { RenderBadge } from './Renders'
 import { SEQUENCE_MIME } from './Sequences'
 import { ContextMenu } from '../components/ContextMenu'
 import { useTransitionCatalog } from './transitionCatalog'
@@ -996,6 +997,7 @@ const TimelineClip = memo(function TimelineClip({
         {linked && <Link2 size={10} className="shrink-0" aria-label="Linked" />}
         {clip.muted && <VolumeX size={10} />}
         <span className="truncate">{label}</span>
+        {clip.type === 'sequence' && clip.sequence_id && <RenderBadge sequenceId={clip.sequence_id} iconOnly />}
         {clip.speed !== 1 && <span className="rounded bg-black/30 px-0.5">{clip.speed}×</span>}
       </div>
       <div className="relative overflow-hidden" style={{ height: bodyH }}>

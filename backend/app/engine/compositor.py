@@ -23,7 +23,7 @@ from typing import Optional
 
 from .. import config
 from ..models import Asset, Clip, Keyframe, Project
-from . import keyframes, media, nested, text, transitions
+from . import keyframes, media, nested, prerender, text, transitions
 from .cmdfile import Commands as _Commands
 
 EPS = 1e-6
@@ -306,7 +306,7 @@ def _add_nested_input(
     fps = project.settings.fps
     height = _nested_height(project, clip, win)
     draft = win.use_proxies
-    if single_frame:
+    if single_frame and prerender.usable(project, clip.sequence_id, height, draft) is None:
         png = nested.render_still(project, clip.sequence_id, max(0.0, vis.src_in), height, draft, stack)
         if png is None:
             return None

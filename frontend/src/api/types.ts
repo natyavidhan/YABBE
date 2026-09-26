@@ -195,6 +195,8 @@ export interface Project {
   assets: Asset[]
   sequences: Sequence[]
   main_sequence_id: string
+  /** Make draft pre-renders of nested sequences in the background after edits. */
+  auto_prerender?: boolean
 }
 
 export interface ProjectSummary {
@@ -221,6 +223,24 @@ export interface Timeline {
 }
 
 export type JobStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled'
+
+export type PrerenderQuality = 'draft' | 'preview' | 'full'
+
+export interface PrerenderQualityStatus {
+  quality: PrerenderQuality
+  state: 'fresh' | 'stale' | 'queued' | 'rendering' | 'none'
+  height: number
+  size: number
+  progress: number
+  job_id: string | null
+}
+
+export interface SequenceRenderStatus {
+  sequence_id: string
+  /** Nested in another sequence. */
+  used: boolean
+  qualities: PrerenderQualityStatus[]
+}
 
 export interface Job {
   id: string

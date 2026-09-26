@@ -7,6 +7,7 @@ import { Button, Field, inputClass, Modal } from '../components/ui'
 import { formatDuration } from '../lib/format'
 import { FPS_PRESETS, RESOLUTION_PRESETS } from '../lib/presets'
 import { ProjectSettingsDialog } from './ProjectSettings'
+import { prerenderMenuItems, RenderBadge } from './Renders'
 import { allSequences, sequenceDuration, useEditor } from './store'
 
 export const SEQUENCE_MIME = 'application/x-yabbe-sequence'
@@ -51,6 +52,8 @@ export function SequencesPanel({ onOpened }: { onOpened?: () => void }) {
       },
     },
     { label: 'Set as main', icon: <Star size={13} />, disabled: seq.id === doc.main, onSelect: () => s.setMainSequence(seq.id) },
+    'divider',
+    ...prerenderMenuItems(seq.id, sequenceDuration(seq) <= 0),
     'divider',
     {
       label: 'Delete',
@@ -124,6 +127,9 @@ export function SequencesPanel({ onOpened }: { onOpened?: () => void }) {
                           Main
                         </span>
                       )}
+                      <span className="ml-auto">
+                        <RenderBadge sequenceId={seq.id} />
+                      </span>
                     </span>
                   )}
                   <span className="block truncate text-[11px] text-faint">
