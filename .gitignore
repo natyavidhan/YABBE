@@ -1,0 +1,15 @@
+# data
+/data/
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+# node
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+# misc
+.DS_Store
+*.log
+.env
