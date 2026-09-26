@@ -401,8 +401,20 @@ export const useEditor = create<EditorState>((set, get) => {
         return { ...d, tracks }
       }),
     removeAssetLocally: (assetId) => {
-      set({ assets: get().assets.filter((a) => a.id !== assetId) })
-      setClips((clips) => clips.filter((c) => c.asset_id !== assetId))
+      // The server already dropped these clips; purge them from history too so
+      // undo can never resurrect clips that point at deleted media.
+      const s = get()
+      const purge = (d: Doc): Doc =>
+        d.clips.some((c) => c.asset_id === assetId) ? { ...d, clips: d.clips.filter((c) => c.asset_id !== assetId) } : d
+      set({
+        assets: s.assets.filter((a) => a.id !== assetId),
+        doc: purge(s.doc),
+        past: s.past.map(purge),
+        future: s.future.map(purge),
+        gestureStart: s.gestureStart && purge(s.gestureStart),
+        selection: s.selection.filter((id) => s.doc.clips.find((c) => c.id === id)?.asset_id !== assetId),
+        version: s.version + 1,
+      })
     },
   }
 })

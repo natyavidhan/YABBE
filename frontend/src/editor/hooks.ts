@@ -96,17 +96,28 @@ export function useTextMeasurements() {
   }, [clips, sizes])
 }
 
-function isTyping(target: EventTarget | null) {
+const NON_TEXT_INPUTS = new Set(['range', 'checkbox', 'radio', 'color', 'button', 'file'])
+
+/** Should this key press go to the focused element instead of the editor? */
+function belongsToField(target: EventTarget | null, key: string) {
   const el = target as HTMLElement | null
   if (!el) return false
-  const tag = el.tagName
-  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
+  if (el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable) return true
+  if (el.tagName === 'INPUT') {
+    const type = (el as HTMLInputElement).type
+    if (!NON_TEXT_INPUTS.has(type)) return true
+    // Sliders keep their arrow keys; everything else goes to the editor.
+    return type === 'range' && key.startsWith('Arrow')
+  }
+  return false
 }
 
 export function useShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (isTyping(e.target)) return
+      if (belongsToField(e.target, e.key)) return
+      // A focused button would also "click" on Space; keep Space for play/pause.
+      if (e.key === ' ' && e.target instanceof HTMLElement && e.target.tagName !== 'BODY') e.target.blur()
       const s = useEditor.getState()
       const mod = e.ctrlKey || e.metaKey
       const fps = s.doc.settings.fps

@@ -86,6 +86,7 @@ async def upload(project_id: str, request: Request, filename: str):
                 fh.write(chunk)
         if size == 0:
             raise HTTPException(400, "Empty upload")
+        media.normalize_orientation(dest)
         try:
             fields = media.analyze(dest)
         except (ffmpeg.FFmpegError, ValueError) as exc:

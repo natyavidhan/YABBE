@@ -214,7 +214,7 @@ def _import_from_zip(path: Path, name: Optional[str]) -> Project:
             if not info.filename.startswith("media/") or info.is_dir():
                 continue
             fname = Path(info.filename).name
-            if fname not in known:  # also blocks path traversal names
+            if fname in ("", ".", "..") or fname not in known:  # also blocks path traversal
                 continue
             with zf.open(info) as src, open(media / fname, "wb") as dst:
                 shutil.copyfileobj(src, dst, 1024 * 1024)

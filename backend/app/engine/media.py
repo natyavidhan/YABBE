@@ -89,6 +89,25 @@ def analyze(path: Path) -> dict:
     return fields
 
 
+def normalize_orientation(path: Path) -> None:
+    """Bake EXIF orientation into photo pixels (FFmpeg ignores the EXIF tag)."""
+    try:
+        from PIL import Image, ImageOps
+
+        with Image.open(path) as im:
+            if im.format not in ("JPEG", "TIFF", "WEBP", "PNG", "MPO"):
+                return
+            orientation = im.getexif().get(0x0112, 1)
+            if orientation in (None, 1):
+                return
+            fixed = ImageOps.exif_transpose(im)
+            fmt = "JPEG" if im.format == "MPO" else im.format
+            params = {"quality": 95} if fmt == "JPEG" else {}
+        fixed.save(path, fmt, **params)
+    except Exception:  # noqa: BLE001 - not an image Pillow understands; leave as is
+        return
+
+
 # -- derived files -------------------------------------------------------------------------
 
 def proxy_path(project_id: str, asset: Asset) -> Path:

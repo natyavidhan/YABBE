@@ -158,3 +158,14 @@ def test_fonts_and_measure(client):
     small = r.json()
     r = client.post("/api/text/measure", json={"content": "Hi", "size": 100})
     assert r.json()["width"] > small["width"]
+
+
+def test_exif_orientation_is_baked_in(client, tmp_path):
+    img = Image.new("RGB", (400, 200), (10, 200, 10))
+    exif = img.getexif()
+    exif[0x0112] = 6  # rotate 90° CW on display
+    path = tmp_path / "phone.jpg"
+    img.save(path, exif=exif)
+    pid = client.post("/api/projects", json={"name": "exif"}).json()["id"]
+    asset = _upload(client, pid, path)
+    assert (asset["kind"], asset["width"], asset["height"]) == ("image", 200, 400)
