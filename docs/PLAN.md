@@ -118,6 +118,8 @@ Ops
       families, back/elastic/bounce, saved curves), F9 shortcuts, box select,
       copy/paste, stretch, snapping; per-property show-in-graph toggles;
       desktop side panel / phone takeover
+- [x] Motion path on the preview: per-frame dots, draggable position keys,
+      click to seek, double-click to add keys, toggle
 
 ## Later
 Transitions, keyframable crop/colour, effects/filters (colour, blur), audio ducking, captions

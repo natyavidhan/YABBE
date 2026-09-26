@@ -70,6 +70,11 @@ videos can be uploaded.
   Quart / Quint / Expo / Circ, Back, Elastic and Bounce (with parameters), and
   your own saved curves. Each animated property has a toggle in the inspector
   to show or hide it in the graph.
+* **Motion path** — when a selected clip's position is animated, the preview
+  draws its path with a dot per frame (spacing shows speed). Drag a key's dot
+  to move that position key (Shift locks the direction), click the path to
+  jump to that moment, double-click it to add a position key. Toggle it with
+  the route button next to the play controls.
 * **Speed** — 0.25×–4× with a hold-to-repeat stepper and presets; the clip
   resizes on the timeline as you change it, or type a length in **Fit to**
   and the speed is chosen so the same footage plays in exactly that time.

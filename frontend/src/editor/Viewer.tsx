@@ -1,5 +1,5 @@
 import Hls from 'hls.js'
-import { Pause, Play, SkipBack, SkipForward, StepBack, StepForward, Volume1, Volume2, VolumeX } from 'lucide-react'
+import { Pause, Play, Route, SkipBack, SkipForward, StepBack, StepForward, Volume1, Volume2, VolumeX } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { Asset } from '../api/types'
@@ -9,6 +9,7 @@ import { clamp, formatTimecode } from '../lib/format'
 import { usePrefs } from '../lib/prefs'
 import { useMediaQuery } from '../lib/useMedia'
 import { hitTest, layerOf, type Layer } from './geometry'
+import { MotionPath } from './MotionPath'
 import { clipEnd, docDuration, timelineOf, useEditor } from './store'
 
 type Quality = 'auto' | 360 | 480 | 720 | 1080 | 'full'
@@ -337,6 +338,7 @@ function Transport({
           <SkipForward size={15} />
         </IconButton>
       </div>
+      <MotionPathToggle />
       <MasterVolume compact={compact} />
       <div className={`items-center justify-end gap-2 text-xs text-muted ${compact ? 'hidden' : 'flex w-40'}`}>
         <span className="hidden xl:inline">
@@ -357,6 +359,19 @@ function Transport({
         </select>
       </div>
     </div>
+  )
+}
+
+function MotionPathToggle() {
+  const on = usePrefs((p) => p.motionPath)
+  return (
+    <IconButton
+      label={on ? 'Hide motion paths' : 'Show motion paths'}
+      active={on}
+      onClick={() => usePrefs.getState().setMotionPath(!on)}
+    >
+      <Route size={15} />
+    </IconButton>
   )
 }
 
@@ -501,6 +516,7 @@ function TransformOverlay({ width }: { width: number }) {
     <div ref={ref} className="absolute inset-0 touch-none overflow-hidden" onPointerDown={onStageDown}>
       {guides.v && <div className="pointer-events-none absolute top-0 bottom-0 left-1/2 w-px bg-accent-2/80" />}
       {guides.h && <div className="pointer-events-none absolute top-1/2 right-0 left-0 h-px bg-accent-2/80" />}
+      <MotionPath width={width} />
       {selected.map((l) => {
         const w = l.width * k
         const h = l.height * k
