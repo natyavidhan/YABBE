@@ -5,7 +5,7 @@ import type { ExportRecord, Job, Quality } from '../api/types'
 import { toast } from '../components/toast'
 import { Button, Field, IconButton, Modal, ProgressBar, Spinner } from '../components/ui'
 import { formatBytes, formatDuration, formatRelative } from '../lib/format'
-import { docDuration, useEditor } from './store'
+import { allSequences, sequenceDuration, useEditor } from './store'
 
 const QUALITIES: { value: Quality; label: string; hint: string }[] = [
   { value: 'high', label: 'High', hint: 'Best quality, slower, bigger file' },
@@ -14,11 +14,14 @@ const QUALITIES: { value: Quality; label: string; hint: string }[] = [
 ]
 
 export function ExportDialog({ projectId, onClose }: { projectId: string; onClose: () => void }) {
-  const settings = useEditor((s) => s.doc.settings)
-  const duration = useEditor((s) => docDuration(s.doc))
-  const pendingMedia = useEditor((s) =>
-    s.assets.filter((a) => a.status === 'processing' && s.doc.clips.some((c) => c.asset_id === a.id)).length,
-  )
+  const doc = useEditor((s) => s.doc)
+  const assets = useEditor((s) => s.assets)
+  const sequences = allSequences(doc)
+  const [seqId, setSeqId] = useState(doc.main)
+  const seq = sequences.find((x) => x.id === seqId) ?? sequences[0]
+  const settings = seq.settings
+  const duration = sequenceDuration(seq)
+  const pendingMedia = assets.filter((a) => a.status === 'processing' && seq.clips.some((c) => c.asset_id === a.id)).length
   const [height, setHeight] = useState<number | null>(null)
   const [quality, setQuality] = useState<Quality>('medium')
   const [exports, setExports] = useState<ExportRecord[]>([])
@@ -54,7 +57,11 @@ export function ExportDialog({ projectId, onClose }: { projectId: string; onClos
   const start = async () => {
     setStarting(true)
     try {
-      await api.startExport(projectId, { height: height === settings.height ? null : height, quality })
+      await api.startExport(projectId, {
+        height: height === settings.height || (height ?? 0) > settings.height ? null : height,
+        quality,
+        sequence_id: seq.id,
+      })
       await refresh()
     } catch (e) {
       toast.error(e)
@@ -66,6 +73,25 @@ export function ExportDialog({ projectId, onClose }: { projectId: string; onClos
   return (
     <Modal title="Export video" onClose={onClose} width="max-w-xl">
       <div className="flex flex-col gap-4">
+        {sequences.length > 1 && (
+          <Field label="Sequence">
+            <select
+              className="h-8 rounded-md border border-line bg-bg px-2 text-fg outline-none focus:border-accent"
+              value={seq.id}
+              onChange={(e) => {
+                setSeqId(e.target.value)
+                setHeight(null)
+              }}
+            >
+              {sequences.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
+                  {x.id === doc.main ? ' (main)' : ''} — {x.settings.width}×{x.settings.height}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Resolution">
             <select
@@ -76,7 +102,7 @@ export function ExportDialog({ projectId, onClose }: { projectId: string; onClos
               {heights.map((h) => (
                 <option key={h} value={h}>
                   {width(h)}×{h}
-                  {h === settings.height ? ' (project)' : ''}
+                  {h === settings.height ? ' (sequence)' : ''}
                 </option>
               ))}
             </select>

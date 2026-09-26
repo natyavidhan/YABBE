@@ -57,6 +57,13 @@ videos can be uploaded.
   on any YABBE server.
 * **Media** — drag-and-drop upload of video, audio and photos. The server
   probes each file and builds a fast-seeking proxy, a filmstrip and a waveform.
+* **Sequences** — a project can hold several timelines, each with its own
+  resolution, frame rate and background. One is the *main* sequence (shown on
+  the dashboard, exported by default). Manage them in the **Sequences** tab of
+  the left panel (new, rename, duplicate, settings, set as main, delete),
+  switch with the tabs above the timeline, and pick any sequence in the export
+  dialog. Undo covers every sequence. Projects from before sequences open with
+  their timeline as the main sequence.
 * **Timeline** — multiple video (layer) and audio tracks; move clips between
   tracks, trim either edge, split, duplicate, snapping, zoom, mute / hide /
   lock tracks, undo / redo.

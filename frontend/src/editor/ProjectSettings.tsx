@@ -62,9 +62,10 @@ export function ProjectSettingsForm() {
 }
 
 export function ProjectSettingsDialog({ onClose }: { onClose: () => void }) {
+  const name = useEditor((s) => s.doc.sequences.find((x) => x.id === s.doc.active)?.name ?? '')
   return (
     <Modal
-      title="Project settings"
+      title={`Sequence settings · ${name}`}
       onClose={onClose}
       footer={
         <Button variant="primary" onClick={onClose}>

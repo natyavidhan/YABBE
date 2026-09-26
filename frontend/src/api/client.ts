@@ -112,7 +112,7 @@ export const api = {
 
   // exports
   listExports: (id: string) => request<ExportRecord[]>('GET', `${p(id)}/exports`),
-  startExport: (id: string, options: { height: number | null; quality: Quality }) =>
+  startExport: (id: string, options: { height: number | null; quality: Quality; sequence_id?: string }) =>
     request<{ export: ExportRecord; job: Job }>('POST', `${p(id)}/exports`, options),
   deleteExport: (id: string, exportId: string) => request<{ ok: boolean }>('DELETE', `${p(id)}/exports/${exportId}`),
   downloadExportUrl: (id: string, exportId: string) => `${p(id)}/exports/${exportId}/download`,

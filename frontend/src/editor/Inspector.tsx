@@ -46,6 +46,7 @@ export function Inspector() {
 }
 
 function ClipOrProjectInspector() {
+  const seqName = useEditor((s) => s.doc.sequences.find((x) => x.id === s.doc.active)?.name ?? 'Sequence')
   const selection = useEditor((s) => s.selection)
   const clip = useEditor((s) => (s.selection.length === 1 ? s.doc.clips.find((c) => c.id === s.selection[0]) : undefined))
   const asset = useEditor((s) => (clip?.asset_id ? s.assets.find((a) => a.id === clip.asset_id) : undefined))
@@ -59,8 +60,8 @@ function ClipOrProjectInspector() {
   if (!clip)
     return (
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <PanelTitle>Project</PanelTitle>
-        <Section icon={<Settings2 size={14} />} title="Project settings">
+        <PanelTitle>{seqName}</PanelTitle>
+        <Section icon={<Settings2 size={14} />} title="Sequence settings">
           <ProjectSettingsForm />
         </Section>
         <p className="px-3 pb-4 text-xs leading-relaxed text-faint">

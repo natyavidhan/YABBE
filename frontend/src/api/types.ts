@@ -175,15 +175,24 @@ export interface Clip {
   link?: string | null
 }
 
+/** One timeline with its own settings. */
+export interface Sequence {
+  id: string
+  name: string
+  settings: ProjectSettings
+  tracks: Track[]
+  clips: Clip[]
+  created_at?: number
+}
+
 export interface Project {
   id: string
   name: string
   created_at: number
   updated_at: number
-  settings: ProjectSettings
   assets: Asset[]
-  tracks: Track[]
-  clips: Clip[]
+  sequences: Sequence[]
+  main_sequence_id: string
 }
 
 export interface ProjectSummary {
@@ -200,6 +209,10 @@ export interface ProjectSummary {
 
 export interface Timeline {
   name?: string
+  sequences?: Sequence[]
+  main_sequence_id?: string
+  /** For a single timeline's contents: which sequence they belong to. */
+  sequence_id?: string
   settings?: ProjectSettings
   tracks?: Track[]
   clips?: Clip[]

@@ -15,6 +15,7 @@ import { useEditor } from '../editor/store'
 import { Timeline } from '../editor/Timeline'
 import { Viewer } from '../editor/Viewer'
 import { GraphEditor } from '../editor/graph/GraphEditor'
+import { SequencesPanel, SequenceTabs } from '../editor/Sequences'
 
 export default function Editor() {
   const { projectId = '' } = useParams()
@@ -137,7 +138,7 @@ function EditorShell({ projectId }: { projectId: string }) {
         <IconButton label="Keyboard shortcuts" onClick={() => setHelpOpen(true)}>
           <Keyboard size={16} />
         </IconButton>
-        <IconButton label="Project settings" onClick={() => setSettingsOpen(true)}>
+        <IconButton label="Sequence settings" onClick={() => setSettingsOpen(true)}>
           <Settings2 size={16} />
         </IconButton>
         <Button
@@ -152,7 +153,7 @@ function EditorShell({ projectId }: { projectId: string }) {
 
       <div className="flex min-h-0 flex-1">
         <aside className="flex w-72 shrink-0 flex-col border-r border-line bg-panel">
-          <MediaBin projectId={projectId} />
+          <LeftPanel projectId={projectId} />
         </aside>
         <main className="flex min-w-0 flex-1 flex-col bg-bg">
           <Viewer projectId={projectId} />
@@ -170,8 +171,11 @@ function EditorShell({ projectId }: { projectId: string }) {
         <div className="absolute inset-x-0 -top-1 h-2 group-hover:bg-accent/30" />
       </div>
       <div style={{ height: timelineHeight }} className="flex shrink-0">
-        <div className="min-w-0 flex-1">
-          <Timeline projectId={projectId} />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <SequenceTabs />
+          <div className="min-h-0 flex-1">
+            <Timeline projectId={projectId} />
+          </div>
         </div>
         <GraphPanel />
       </div>
@@ -218,6 +222,37 @@ function GraphPanel() {
   )
 }
 
+/** Left panel: Media bin or the project's sequences. */
+function LeftPanel({ projectId, onDone }: { projectId: string; onDone?: () => void }) {
+  const [tab, setTab] = useState<'media' | 'sequences'>(() =>
+    localStorageGet('yabbe.leftTab') === 'sequences' ? 'sequences' : 'media',
+  )
+  const pick = (t: 'media' | 'sequences') => {
+    setTab(t)
+    localStorageSet('yabbe.leftTab', t)
+  }
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 gap-1 border-b border-line px-2 pt-2" role="tablist">
+        {(['media', 'sequences'] as const).map((t) => (
+          <button
+            key={t}
+            role="tab"
+            aria-selected={tab === t}
+            onClick={() => pick(t)}
+            className={`-mb-px rounded-t-md border px-3 py-1.5 text-xs font-medium capitalize transition-colors ${
+              tab === t ? 'border-line border-b-panel bg-panel text-fg' : 'border-transparent text-muted hover:text-fg'
+            }`}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+      {tab === 'media' ? <MediaBin projectId={projectId} onAdded={onDone} /> : <SequencesPanel onOpened={onDone} />}
+    </div>
+  )
+}
+
 type SheetKind = 'media' | 'edit' | null
 
 /** Phone layout: preview on top, timeline below, panels as bottom sheets. */
@@ -241,7 +276,16 @@ function MobileEditor({
   useEffect(() => {
     if (transSel) setSheet('edit')
   }, [transSel])
-  const timelineArea = graphOpen ? <GraphEditor compact onClose={closeGraph} /> : <Timeline projectId={projectId} />
+  const timelineArea = graphOpen ? (
+    <GraphEditor compact onClose={closeGraph} />
+  ) : (
+    <div className="flex h-full flex-col">
+      <SequenceTabs />
+      <div className="min-h-0 flex-1">
+        <Timeline projectId={projectId} />
+      </div>
+    </div>
+  )
   // Landscape phones: preview and timeline side by side, panels slide over the timeline.
   const landscape = useMediaQuery('(orientation: landscape)')
   const PREVIEW_H = '38dvh'
@@ -262,7 +306,7 @@ function MobileEditor({
       />
       <TabButton
         icon={<SlidersHorizontal size={18} />}
-        label={transSel ? 'Transition' : selected ? 'Edit clip' : 'Project'}
+        label={transSel ? 'Transition' : selected ? 'Edit clip' : 'Settings'}
         compact={landscape}
         badge={selected > 0 || !!transSel}
         active={sheet === 'edit'}
@@ -326,14 +370,14 @@ function MobileEditor({
         >
           <div className="flex items-center justify-between border-b border-line px-3 py-1.5">
             <span className="text-xs font-semibold tracking-wide text-muted uppercase">
-              {sheet === 'media' ? 'Media' : transSel ? 'Transition' : selected ? 'Clip properties' : 'Project'}
+              {sheet === 'media' ? 'Media' : transSel ? 'Transition' : selected ? 'Clip properties' : 'Sequence settings'}
             </span>
             <IconButton label="Close panel" onClick={() => setSheet(null)} className="h-8! w-8!">
               <X size={18} />
             </IconButton>
           </div>
           <div className="flex min-h-0 flex-1 flex-col pb-[env(safe-area-inset-bottom)]">
-            {sheet === 'media' ? <MediaBin projectId={projectId} onAdded={() => setSheet(null)} /> : <Inspector />}
+            {sheet === 'media' ? <LeftPanel projectId={projectId} onDone={() => setSheet(null)} /> : <Inspector />}
           </div>
         </div>
       )}

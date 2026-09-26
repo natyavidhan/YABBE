@@ -1,21 +1,51 @@
 import { create } from 'zustand'
-import type { AnimProp, Asset, Clip, ClipType, Ease, Keyframe, Marker, Transition, Project, ProjectSettings, TextStyle, Timeline, Track, TrackKind } from '../api/types'
+import type { AnimProp, Asset, Clip, ClipType, Ease, Keyframe, Marker, Sequence, Transition, Project, ProjectSettings, TextStyle, Timeline, Track, TrackKind } from '../api/types'
 import { clamp, uid } from '../lib/format'
 import { recalcAuto } from './graph/model'
 import { colorPropAt, shiftMarkers, visibleMarkers, framesOf, isColorProp, keyIndexAt, localTime, propAt, shiftKeyframes, staticColor, staticValue, TEXT_COLOR, TEXT_NUMERIC, upsertKey } from './keyframes'
 
 /** The user-editable part of a project (what undo/redo and autosave cover). */
+/**
+ * The editable project. ``settings`` / ``tracks`` / ``clips`` are the OPEN
+ * sequence (``active``) so all timeline code works on it directly; the entry
+ * for ``active`` inside ``sequences`` is stale while it's open (see
+ * allSequences). Undo snapshots cover every sequence.
+ */
 export interface Doc {
   name: string
   settings: ProjectSettings
   tracks: Track[]
   clips: Clip[]
+  active: string
+  main: string
+  sequences: Sequence[]
 }
 
 /** A keyframe selected in the graph editor (on the selected clip). */
 export interface GraphKey {
   prop: AnimProp
   i: number
+}
+
+// Open sequence tabs, remembered per project in this browser.
+const tabsKey = (projectId: string) => `yabbe.tabs.${projectId}`
+function loadTabs(p: Project): string[] {
+  const ids = new Set(p.sequences.map((s) => s.id))
+  try {
+    const saved: string[] = JSON.parse(localStorage.getItem(tabsKey(p.id)) ?? '[]')
+    const tabs = saved.filter((id) => ids.has(id))
+    return tabs.includes(p.main_sequence_id) || tabs.length ? tabs : [p.main_sequence_id]
+  } catch {
+    return [p.main_sequence_id]
+  }
+}
+function saveTabs(projectId: string | null, tabs: string[]) {
+  if (!projectId) return
+  try {
+    localStorage.setItem(tabsKey(projectId), JSON.stringify(tabs))
+  } catch {
+    /* ignore */
+  }
 }
 
 // Snapping preferences (this browser).
@@ -107,6 +137,19 @@ interface EditorState {
   uploads: Upload[]
   textSizes: Record<string, { width: number; height: number }>
 
+  // sequences
+  /** Per-sequence playhead / zoom, restored when switching. */
+  seqView: Record<string, { playhead: number; zoom: number }>
+  /** Sequences shown as tabs above the timeline. */
+  openTabs: string[]
+  openSequence: (id: string) => void
+  closeTab: (id: string) => void
+  createSequence: (init: { name: string; settings: ProjectSettings }) => string
+  duplicateSequence: (id: string) => string | null
+  renameSequence: (id: string, name: string) => void
+  deleteSequence: (id: string) => void
+  setMainSequence: (id: string) => void
+
   // graph editor (view state; not part of the project or undo history)
   graphOpen: boolean
   /** `${clipId}:${prop}` -> hidden from the graph editor. */
@@ -194,6 +237,9 @@ const emptyDoc: Doc = {
   settings: { width: 1920, height: 1080, fps: 30, background: '#000000' },
   tracks: [],
   clips: [],
+  active: '',
+  main: '',
+  sequences: [],
 }
 
 export const MIN_SPEED = 0.25
@@ -257,8 +303,30 @@ export const clipEnd = (c: Clip) => c.start + c.duration
 export const docDuration = (d: Doc) => d.clips.reduce((m, c) => Math.max(m, clipEnd(c)), 0)
 export const textKey = (t: TextStyle) => JSON.stringify(t)
 
+/** The open sequence's contents, for render requests. */
 export function timelineOf(doc: Doc): Timeline {
-  return { settings: doc.settings, tracks: doc.tracks, clips: doc.clips }
+  return { sequence_id: doc.active, settings: doc.settings, tracks: doc.tracks, clips: doc.clips }
+}
+
+/** Every sequence with the open one's live contents merged in. */
+export function allSequences(doc: Doc): Sequence[] {
+  return doc.sequences.map((s) =>
+    s.id === doc.active ? { ...s, settings: doc.settings, tracks: doc.tracks, clips: doc.clips } : s,
+  )
+}
+
+export const activeSequence = (doc: Doc): Sequence =>
+  allSequences(doc).find((s) => s.id === doc.active) ?? allSequences(doc)[0]
+
+export const sequenceDuration = (s: Sequence) => s.clips.reduce((m, c) => Math.max(m, clipEnd(c)), 0)
+
+/** Switch the open sequence inside a doc (pure). */
+function withActive(doc: Doc, id: string): Doc {
+  if (id === doc.active) return doc
+  const seqs = allSequences(doc)
+  const target = seqs.find((s) => s.id === id)
+  if (!target) return doc
+  return { ...doc, sequences: seqs, active: id, settings: target.settings, tracks: target.tracks, clips: target.clips }
 }
 
 export function trackKindFor(type: ClipType): TrackKind {
@@ -377,6 +445,88 @@ export const useEditor = create<EditorState>((set, get) => {
       if (pid) saveMap(collapsedKey(pid), next)
     },
 
+    seqView: {},
+    openTabs: [],
+
+    openSequence: (id) => {
+      const s = get()
+      if (id === s.doc.active || !s.doc.sequences.some((x) => x.id === id)) return
+      const seqView = { ...s.seqView, [s.doc.active]: { playhead: s.playhead, zoom: s.zoom } }
+      const view = seqView[id]
+      const openTabs = s.openTabs.includes(id) ? s.openTabs : [...s.openTabs, id]
+      saveTabs(s.projectId, openTabs)
+      // Switching isn't an edit: no undo entry, no autosave needed.
+      set({
+        doc: withActive(s.doc, id),
+        seqView,
+        openTabs,
+        playhead: view?.playhead ?? 0,
+        zoom: view?.zoom ?? s.zoom,
+        playing: false,
+        selection: [],
+        graphSel: [],
+        transSel: null,
+      })
+    },
+    closeTab: (id) => {
+      const s = get()
+      if (s.openTabs.length <= 1) return
+      const openTabs = s.openTabs.filter((t) => t !== id)
+      saveTabs(s.projectId, openTabs)
+      set({ openTabs })
+      if (s.doc.active === id) get().openSequence(openTabs[Math.max(0, s.openTabs.indexOf(id) - 1)] ?? openTabs[0])
+    },
+    createSequence: ({ name, settings }) => {
+      const seq: Sequence = {
+        id: uid('s_'),
+        name,
+        settings,
+        tracks: [
+          { id: uid('t_'), kind: 'video', name: 'Video 2', muted: false, hidden: false, locked: false },
+          { id: uid('t_'), kind: 'video', name: 'Video 1', muted: false, hidden: false, locked: false },
+          { id: uid('t_'), kind: 'audio', name: 'Audio 1', muted: false, hidden: false, locked: false },
+        ],
+        clips: [],
+        created_at: Date.now() / 1000,
+      }
+      change((d) => ({ ...d, sequences: [...allSequences(d), seq] }))
+      get().openSequence(seq.id)
+      return seq.id
+    },
+    duplicateSequence: (id) => {
+      const src = allSequences(get().doc).find((s) => s.id === id)
+      if (!src) return null
+      const copy: Sequence = { ...structuredClone(src), id: uid('s_'), name: `${src.name} copy`, created_at: Date.now() / 1000 }
+      // fresh ids so the copy is independent
+      const trackMap = new Map(copy.tracks.map((t) => [t.id, uid('t_')]))
+      copy.tracks = copy.tracks.map((t) => ({ ...t, id: trackMap.get(t.id)! }))
+      const linkMap = new Map<string, string>()
+      copy.clips = copy.clips.map((c) => ({
+        ...c,
+        id: uid('c_'),
+        track_id: trackMap.get(c.track_id) ?? c.track_id,
+        link: c.link ? (linkMap.get(c.link) ?? linkMap.set(c.link, uid('l_')).get(c.link)!) : null,
+      }))
+      change((d) => {
+        const seqs = allSequences(d)
+        const at = seqs.findIndex((s) => s.id === id)
+        return { ...d, sequences: [...seqs.slice(0, at + 1), copy, ...seqs.slice(at + 1)] }
+      })
+      return copy.id
+    },
+    renameSequence: (id, name) =>
+      change((d) => ({ ...d, sequences: allSequences(d).map((s) => (s.id === id ? { ...s, name } : s)) })),
+    deleteSequence: (id) => {
+      const s = get()
+      if (id === s.doc.main || s.doc.sequences.length <= 1) return
+      if (s.doc.active === id) get().openSequence(s.doc.main)
+      change((d) => ({ ...d, sequences: allSequences(d).filter((x) => x.id !== id) }))
+      const openTabs = get().openTabs.filter((t) => t !== id)
+      saveTabs(s.projectId, openTabs)
+      set({ openTabs: openTabs.length ? openTabs : [get().doc.main] })
+    },
+    setMainSequence: (id) => change((d) => ({ ...d, main: id })),
+
     selectTransition: (clipId) => set(clipId ? { transSel: clipId, selection: [], graphSel: [] } : { transSel: null }),
     setTransition: (clipId, t) =>
       setClips((clips) => clips.map((c) => (c.id === clipId ? { ...c, transition: t } : c))),
@@ -412,7 +562,20 @@ export const useEditor = create<EditorState>((set, get) => {
       set({
         projectId: p.id,
         assets: p.assets,
-        doc: { name: p.name, settings: p.settings, tracks: p.tracks, clips: p.clips },
+        doc: (() => {
+          const main = p.sequences.find((s) => s.id === p.main_sequence_id) ?? p.sequences[0]
+          return {
+            name: p.name,
+            settings: main.settings,
+            tracks: main.tracks,
+            clips: main.clips,
+            active: main.id,
+            main: p.main_sequence_id,
+            sequences: p.sequences,
+          }
+        })(),
+        seqView: {},
+        openTabs: loadTabs(p),
         past: [],
         future: [],
         gestureStart: null,

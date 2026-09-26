@@ -3,7 +3,7 @@ import { api } from '../api/client'
 import { toast } from '../components/toast'
 import { textStyleAt } from './keyframes'
 import { runEasyEase } from './graph/actions'
-import { allMarkers, docDuration, textKey, useEditor } from './store'
+import { allMarkers, allSequences, docDuration, textKey, useEditor } from './store'
 
 const AUTOSAVE_DELAY = 700
 
@@ -17,10 +17,11 @@ export function useAutosave(projectId: string) {
     const s = useEditor.getState()
     if (s.version === s.savedVersion || s.projectId !== projectId) return
     const v = s.version
-    const { name, settings, tracks, clips } = s.doc
+    const { name, main } = s.doc
+    const sequences = allSequences(s.doc)
     try {
       if (saving.current) await saving.current
-      saving.current = api.saveProject(projectId, { name, settings, tracks, clips }).then(() => {
+      saving.current = api.saveProject(projectId, { name, sequences, main_sequence_id: main }).then(() => {
         useEditor.getState().markSaved(v)
       })
       await saving.current
