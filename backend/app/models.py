@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import time
 import uuid
@@ -141,7 +142,14 @@ TEXT_NUMERIC_PROPS = {
 }
 TEXT_COLOR_PROPS = {"text_color": "color", "text_stroke_color": "stroke_color", "text_background": "background"}
 TEXT_INT_FIELDS = {"size", "stroke_width", "padding"}
-Ease = Literal["linear", "ease_in", "ease_out", "ease_in_out", "hold"]
+Ease = Literal[
+    "linear", "hold", "bezier",
+    "ease_in", "ease_out", "ease_in_out",
+    "back_in", "back_out", "back_in_out",
+    "elastic_in", "elastic_out", "elastic_in_out",
+    "bounce_in", "bounce_out", "bounce_in_out",
+]
+HandleMode = Literal["auto", "auto_clamped", "aligned", "free"]
 
 # Valid ranges for animated values (same limits as the static fields).
 ANIM_LIMITS: dict[str, tuple[float, float]] = {
@@ -168,7 +176,22 @@ class Keyframe(_Model):
     t: float
     v: float = 0.0
     c: Optional[str] = None  # colour value (#rrggbb[aa]) for colour properties
-    ease: Ease = "linear"
+    ease: Ease = "linear"  # shape of the segment from this key to the next
+    # Bézier handles as (dt, dv) offsets from the key: incoming / outgoing.
+    hi: Optional[tuple[float, float]] = None
+    ho: Optional[tuple[float, float]] = None
+    hm: Optional[HandleMode] = None  # how the editor keeps the handles (UI only)
+    ep: Optional[list[float]] = Field(None, max_length=4)  # ease parameters (back/elastic)
+
+    @field_validator("hi", "ho")
+    @classmethod
+    def _finite(cls, h):
+        if h is None:
+            return None
+        dt, dv = h
+        if not (math.isfinite(dt) and math.isfinite(dv)):
+            return None
+        return (dt, dv)
 
 
 class Clip(_Model):
@@ -203,10 +226,10 @@ class Clip(_Model):
                 if prop in TEXT_COLOR_PROPS:
                     if not k.c or not HEX_COLOR.match(k.c):
                         continue
-                    by_time[round(k.t, 6)] = Keyframe(t=k.t, c=k.c.lower(), ease=k.ease)
+                    by_time[round(k.t, 6)] = k.model_copy(update={"c": k.c.lower()})
                 else:
                     lo, hi = ANIM_LIMITS[prop]
-                    by_time[round(k.t, 6)] = Keyframe(t=k.t, v=min(hi, max(lo, k.v)), ease=k.ease)
+                    by_time[round(k.t, 6)] = k.model_copy(update={"v": min(hi, max(lo, k.v))})
             if by_time:
                 out[prop] = sorted(by_time.values(), key=lambda k: k.t)
         return out

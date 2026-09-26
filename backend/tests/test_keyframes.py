@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import io
+import json
 import subprocess
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -18,23 +20,43 @@ def K(t, v, ease="linear"):
     return Keyframe(t=t, v=v, ease=ease)
 
 
-@pytest.mark.parametrize("ease", ["linear", "ease_in", "ease_out", "ease_in_out", "hold"])
-def test_expression_matches_python(ease):
-    frames = [K(0.5, 10, ease), K(1.5, 110, "linear"), K(3, -50)]
-    expr = keyframes.expr(frames, "(t)")
-    for u in [0, 0.5, 0.75, 1.0, 1.25, 1.5, 2.2, 3, 4]:
-        # Evaluate the FFmpeg expression with FFmpeg itself (aevalsrc at time u).
-        out = subprocess.run(
-            ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", f"aevalsrc='{expr}':s=8000:d={u + 0.01}",
-             "-f", "f64le", "-"], capture_output=True, check=True).stdout
-        import struct
-        samples = struct.unpack(f"<{len(out) // 8}d", out)
-        ff = samples[int(round(u * 8000))] if int(round(u * 8000)) < len(samples) else samples[-1]
-        assert ff == pytest.approx(keyframes.value_at(frames, u), abs=1e-3), (ease, u)
+def test_curve_fixture_is_current():
+    """The shared fixture (also used by the frontend tests) matches Python."""
+    from gen_curve_fixture import build
+    committed = json.loads((Path(__file__).parent / "fixtures" / "curves.json").read_text())
+    assert committed == build(), "run: uv run python tests/gen_curve_fixture.py"
+
+
+@pytest.mark.parametrize("ease", ["linear", "ease_in", "ease_out", "ease_in_out", "back_in", "back_out",
+                                  "back_in_out", "elastic_in", "elastic_out", "elastic_in_out",
+                                  "bounce_in", "bounce_out", "bounce_in_out"])
+def test_named_eases_hit_endpoints(ease):
+    from app.engine.curves import named_ease
+    assert named_ease(ease, 0) == pytest.approx(0, abs=1e-9)
+    assert named_ease(ease, 1) == pytest.approx(1, abs=1e-9)
+
+
+def test_bezier_segments():
+    from app.engine.curves import value_at
+    # Default handles (none given) = straight line.
+    lin = [K(0, 0, "bezier"), K(2, 100)]
+    assert value_at(lin, 0.5) == pytest.approx(25, abs=1e-6)
+    # Flat handles (easy ease): slow at both ends, symmetric.
+    ease = [Keyframe(t=0, v=0, ease="bezier", ho=(2 / 3, 0)), Keyframe(t=2, v=100, hi=(-2 / 3, 0))]
+    assert value_at(ease, 1) == pytest.approx(50, abs=1e-6)
+    assert value_at(ease, 0.2) < 5 and value_at(ease, 1.8) > 95
+    # A bump between equal values (impossible with named eases).
+    bump = [Keyframe(t=0, v=0, ease="bezier", ho=(0.5, 80)), Keyframe(t=2, v=0, hi=(-0.5, 80))]
+    assert value_at(bump, 1) > 50
+    # Over-long handles are clamped so time never runs backwards.
+    wild = [Keyframe(t=0, v=0, ease="bezier", ho=(10, 0)), Keyframe(t=1, v=1, hi=(-10, 0))]
+    vals = [value_at(wild, u / 20) for u in range(21)]
+    assert vals == sorted(vals)
 
 
 def test_ease_shapes():
     assert keyframes.ease("linear", 0.25) == pytest.approx(0.25)
+    assert keyframes.ease("back_out", 0.6) > 1  # overshoots
     assert keyframes.ease("ease_in", 0.5) < 0.5 < keyframes.ease("ease_out", 0.5)
     assert keyframes.ease("ease_in_out", 0.5) == pytest.approx(0.5)
     assert keyframes.ease("hold", 0.99) == 0
@@ -182,3 +204,38 @@ def test_text_style_keyframes(client, tmp_path):
         assert all(abs(x - y) <= 4 for x, y in zip(eb, sb)), (t, eb, sb)
         ec, sc = _mean_rgb(Image.open(png), eb), _mean_rgb(single, sb)
         assert all(abs(x - y) < 25 for x, y in zip(ec, sc)), (t, ec, sc)
+
+
+def test_new_curves_render_exactly(client, tmp_path):
+    """Back / elastic / bounce / Bézier curves: export (per-frame commands)
+    matches single-frame renders (Python evaluation) at the same instants."""
+    photo = tmp_path / "red2.png"
+    Image.new("RGB", (300, 300), (230, 20, 20)).save(photo)
+    pid = client.post("/api/projects", json={"name": "curves", "width": 640, "height": 360, "fps": 25}).json()["id"]
+    img = _upload(client, pid, photo)
+    project = _wait_ready(client, pid)
+    clip = {
+        "track_id": project["tracks"][1]["id"], "type": "image", "asset_id": img["id"], "start": 0, "duration": 3.2,
+        "transform": {"scale": 0.25},
+        "keyframes": {
+            "x": [{"t": 0, "v": -250, "ease": "back_out"}, {"t": 1, "v": 150, "ease": "elastic_out", "ep": [2, 8]},
+                  {"t": 2, "v": -100, "ease": "bezier", "ho": [0.2, 300]}, {"t": 3, "v": 100, "hi": [-0.3, 0]}],
+            "scale": [{"t": 0, "v": 0.15, "ease": "bounce_out"}, {"t": 1.5, "v": 0.4}],
+            "rotation": [{"t": 0, "v": 0, "ease": "bezier", "ho": [1, 120]}, {"t": 3, "v": 0, "hi": [-1, 120]}],
+        },
+    }
+    assert client.put(f"/api/projects/{pid}", json={"clips": [clip]}).status_code == 200
+    r = client.post(f"/api/projects/{pid}/exports", json={"quality": "high"})
+    job = _wait_job(client, r.json()["job"]["id"])
+    assert job["status"] == "done", job
+    mp4 = tmp_path / "curves.mp4"
+    mp4.write_bytes(client.get(f"/api/projects/{pid}/exports/{r.json()['export']['id']}/download").content)
+    for t in (0.2, 0.4, 0.72, 1.12, 1.4, 2.2, 2.6, 3.0):
+        single = Image.open(io.BytesIO(client.post(f"/api/projects/{pid}/frame", json={"t": t, "height": 360}).content))
+        png = tmp_path / f"c{t}.png"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(t), "-i", str(mp4), "-frames:v", "1", str(png)], check=True)
+        ecx, ecy, en = _red_centroid(Image.open(png))
+        scx, scy, sn = _red_centroid(single)
+        assert en and sn, t
+        assert abs(ecx - scx) < 4 and abs(ecy - scy) < 4, (t, ecx, scx)
+        assert abs(en - sn) / sn < 0.12, (t, en, sn)
