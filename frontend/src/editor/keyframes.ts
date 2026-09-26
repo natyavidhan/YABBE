@@ -1,7 +1,25 @@
 // Mirrors backend/app/engine/keyframes.py — keep the curves identical.
-import type { AnimProp, Clip, Ease, Keyframe } from '../api/types'
+import type { AnimProp, Clip, Ease, Keyframe, TextStyle } from '../api/types'
 
 export const ANIM_PROPS: AnimProp[] = ['x', 'y', 'scale', 'rotation', 'opacity', 'volume']
+
+type NumericTextField = 'size' | 'stroke_width' | 'padding' | 'line_spacing'
+type ColorTextField = 'color' | 'stroke_color' | 'background'
+
+export const TEXT_NUMERIC: Partial<Record<AnimProp, NumericTextField>> = {
+  text_size: 'size',
+  text_stroke_width: 'stroke_width',
+  text_padding: 'padding',
+  text_line_spacing: 'line_spacing',
+}
+export const TEXT_COLOR: Partial<Record<AnimProp, ColorTextField>> = {
+  text_color: 'color',
+  text_stroke_color: 'stroke_color',
+  text_background: 'background',
+}
+const INT_FIELDS = new Set(['size', 'stroke_width', 'padding'])
+
+export const isColorProp = (p: AnimProp) => p in TEXT_COLOR
 
 export const EASES: { value: Ease; label: string }[] = [
   { value: 'linear', label: 'Linear' },
@@ -41,7 +59,67 @@ export function valueAt(frames: Keyframe[], u: number): number {
 }
 
 export function staticValue(clip: Clip, prop: AnimProp): number {
-  return prop === 'volume' ? clip.volume : clip.transform[prop]
+  if (prop === 'volume') return clip.volume
+  const field = TEXT_NUMERIC[prop]
+  if (field) return clip.text?.[field] ?? 0
+  if (isColorProp(prop)) return 0
+  return clip.transform[prop as 'x' | 'y' | 'scale' | 'rotation' | 'opacity']
+}
+
+export function staticColor(clip: Clip, prop: AnimProp): string | null {
+  const field = TEXT_COLOR[prop]
+  return field ? (clip.text?.[field] ?? null) : null
+}
+
+// -- colours ---------------------------------------------------------------------------
+
+function rgba(c: string): number[] {
+  const h = c.replace('#', '')
+  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)).concat(h.length >= 8 ? parseInt(h.slice(6, 8), 16) : 255)
+}
+
+const hex = (ch: number[]) =>
+  '#' + ch.map((x) => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0')).join('')
+
+export function colorAt(frames: Keyframe[], u: number): string {
+  const col = (k: Keyframe) => rgba(k.c || '#ffffff')
+  if (u <= frames[0].t) return hex(col(frames[0]))
+  for (let i = 0; i < frames.length - 1; i++) {
+    const a = frames[i]
+    const b = frames[i + 1]
+    if (u < b.t) {
+      const span = b.t - a.t
+      const p = ease(a.ease, span > 0 ? (u - a.t) / span : 1)
+      const ca = col(a)
+      const cb = col(b)
+      return hex(ca.map((x, j) => x + (cb[j] - x) * p))
+    }
+  }
+  return hex(col(frames[frames.length - 1]))
+}
+
+/** Colour property at timeline time ``T`` (keyframes applied). */
+export function colorPropAt(clip: Clip, prop: AnimProp, T: number): string | null {
+  const f = framesOf(clip, prop)
+  return f ? colorAt(f, T - clip.start) : staticColor(clip, prop)
+}
+
+/** Text style with style keyframes evaluated at timeline time ``T``. */
+export function textStyleAt(clip: Clip, T: number): TextStyle | null {
+  if (!clip.text) return null
+  let style = clip.text
+  for (const [prop, field] of Object.entries(TEXT_NUMERIC) as [AnimProp, NumericTextField][]) {
+    const f = framesOf(clip, prop)
+    if (f) {
+      const v = valueAt(f, T - clip.start)
+      style = { ...style, [field]: INT_FIELDS.has(field) ? Math.round(v) : Math.round(v * 1000) / 1000 }
+    }
+  }
+  for (const [prop, field] of Object.entries(TEXT_COLOR) as [AnimProp, ColorTextField][]) {
+    const f = framesOf(clip, prop)
+    if (f) style = { ...style, [field]: colorAt(f, T - clip.start) }
+  }
+  return style
 }
 
 export const framesOf = (clip: Clip, prop: AnimProp): Keyframe[] | undefined => {
@@ -84,15 +162,17 @@ export function keyIndexAt(frames: Keyframe[] | undefined, u: number, fps: numbe
   return frames.findIndex((k) => Math.abs(k.t - u) <= tol)
 }
 
-/** Insert or replace the keyframe at ``u`` (keeps its easing when replacing). */
-export function upsertKey(frames: Keyframe[] | undefined, u: number, v: number, fps: number): Keyframe[] {
+/** Insert or replace the keyframe at ``u`` (keeps its easing when replacing).
+ * ``value`` is a number, or a colour string for colour properties. */
+export function upsertKey(frames: Keyframe[] | undefined, u: number, value: number | string, fps: number): Keyframe[] {
   const list = [...(frames ?? [])]
+  const fields = typeof value === 'string' ? { v: 0, c: value } : { v: value }
   const i = keyIndexAt(list, u, fps)
-  if (i >= 0) list[i] = { ...list[i], v }
+  if (i >= 0) list[i] = { ...list[i], ...fields }
   else {
     // A new key inherits the easing of the segment it splits.
     const prev = [...list].reverse().find((k) => k.t < u)
-    list.push({ t: u, v, ease: prev?.ease ?? 'linear' })
+    list.push({ t: u, ...fields, ease: prev?.ease ?? 'linear' })
   }
   return list.sort((a, b) => a.t - b.t)
 }

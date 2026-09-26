@@ -125,3 +125,60 @@ def test_animated_render_matches_single_frames(client, tmp_path):
                               "-f", "null", "-"], capture_output=True, text=True).stderr
         return float(out.split("mean_volume:")[1].split("dB")[0])
     assert level(0.2) < -60 and level(1.5) > -30
+
+
+def _ink_box(img: Image.Image):
+    """Bounding box of non-black pixels and the average colour inside it."""
+    im = img.convert("RGB")
+    mask = im.convert("L").point(lambda v: 255 if v > 40 else 0)
+    box = mask.getbbox()
+    return box
+
+
+def _mean_rgb(img: Image.Image, box):
+    crop = img.convert("RGB").crop(box)
+    px = list(crop.getdata())
+    lit = [p for p in px if sum(p) > 120] or px
+    return tuple(sum(c[i] for c in lit) / len(lit) for i in range(3))
+
+
+def test_text_style_keyframes(client, tmp_path):
+    pid = client.post("/api/projects", json={"name": "text kf", "width": 640, "height": 360, "fps": 25}).json()["id"]
+    project = client.get(f"/api/projects/{pid}").json()
+    clip = {
+        "track_id": project["tracks"][0]["id"], "type": "text", "start": 0, "duration": 2.5,
+        "text": {"content": "YABBE", "size": 60, "color": "#ffffff", "background": "#00c0ff00", "padding": 10},
+        "keyframes": {
+            "text_size": [{"t": 0, "v": 60}, {"t": 2, "v": 140}],
+            "text_color": [{"t": 0, "c": "#ffffff"}, {"t": 2, "c": "#ff0000"}],
+            "text_background": [{"t": 0, "c": "#00c0ff00"}, {"t": 2, "c": "#00c0ffff"}],
+        },
+    }
+    r = client.put(f"/api/projects/{pid}", json={"clips": [clip]})
+    assert r.status_code == 200, r.text
+    assert set(r.json()["clips"][0]["keyframes"]) == {"text_size", "text_color", "text_background"}
+
+    singles = {t: Image.open(io.BytesIO(client.post(f"/api/projects/{pid}/frame", json={"t": t, "height": 360}).content))
+               for t in (0.2, 1.0, 2.0)}
+    widths = {t: (lambda b: b[2] - b[0])(_ink_box(im)) for t, im in singles.items()}
+    assert widths[0.2] < widths[1.0] < widths[2.0]  # growing font
+    # at 2 s: box fully blue, text red
+    b = _ink_box(singles[2.0])
+    corner = singles[2.0].convert("RGB").getpixel((b[0] + 2, b[1] + 2))
+    assert corner[2] > 180 and corner[0] < 60, corner
+    # at 0.2 s: box nearly transparent, text still nearly white
+    r0, g0, b0 = _mean_rgb(singles[0.2], _ink_box(singles[0.2]))
+    assert min(r0, g0, b0) > 150
+
+    r = client.post(f"/api/projects/{pid}/exports", json={"quality": "high"})
+    job = _wait_job(client, r.json()["job"]["id"])
+    assert job["status"] == "done", job
+    mp4 = tmp_path / "text.mp4"
+    mp4.write_bytes(client.get(f"/api/projects/{pid}/exports/{r.json()['export']['id']}/download").content)
+    for t, single in singles.items():
+        png = tmp_path / f"t{t}.png"
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(t), "-i", str(mp4), "-frames:v", "1", str(png)], check=True)
+        eb, sb = _ink_box(Image.open(png)), _ink_box(single)
+        assert all(abs(x - y) <= 4 for x, y in zip(eb, sb)), (t, eb, sb)
+        ec, sc = _mean_rgb(Image.open(png), eb), _mean_rgb(single, sb)
+        assert all(abs(x - y) < 25 for x, y in zip(ec, sc)), (t, ec, sc)

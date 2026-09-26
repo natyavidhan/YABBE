@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { api } from '../api/client'
 import { toast } from '../components/toast'
+import { textStyleAt } from './keyframes'
 import { docDuration, textKey, useEditor } from './store'
 
 const AUTOSAVE_DELAY = 700
@@ -80,20 +81,25 @@ export function useAssetPolling(projectId: string) {
 export function useTextMeasurements() {
   const clips = useEditor((s) => s.doc.clips)
   const sizes = useEditor((s) => s.textSizes)
+  const playhead = useEditor((s) => s.playhead)
+  const playing = useEditor((s) => s.playing)
   const pending = useRef(new Set<string>())
   useEffect(() => {
-    for (const c of clips) {
-      if (c.type !== 'text' || !c.text) continue
-      const key = textKey(c.text)
+    if (playing) return // the selection box is hidden while playing
+    const styles = clips.flatMap((c) =>
+      c.type === 'text' && c.text ? [c.text, textStyleAt(c, playhead)!].filter(Boolean) : [],
+    )
+    for (const style of styles) {
+      const key = textKey(style)
       if (sizes[key] || pending.current.has(key)) continue
       pending.current.add(key)
       api
-        .measureText(c.text)
+        .measureText(style)
         .then((size) => useEditor.getState().setTextSize(key, size))
         .catch(() => {})
         .finally(() => pending.current.delete(key))
     }
-  }, [clips, sizes])
+  }, [clips, sizes, playhead, playing])
 }
 
 const NON_TEXT_INPUTS = new Set(['range', 'checkbox', 'radio', 'color', 'button', 'file'])

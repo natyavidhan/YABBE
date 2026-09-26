@@ -1,5 +1,5 @@
 import type { Asset, Clip, ProjectSettings } from '../api/types'
-import { transformAt } from './keyframes'
+import { textStyleAt, transformAt } from './keyframes'
 import { textKey } from './store'
 
 /** Mirrors backend compositor.layer_geometry (project pixels). */
@@ -21,8 +21,14 @@ export function sourceSize(
   clip: Clip,
   assets: Map<string, Asset>,
   textSizes: Record<string, { width: number; height: number }>,
+  time?: number,
 ): { width: number; height: number } | null {
-  if (clip.type === 'text') return clip.text ? (textSizes[textKey(clip.text)] ?? null) : null
+  if (clip.type === 'text') {
+    const style = time === undefined ? clip.text : textStyleAt(clip, time)
+    if (!style) return null
+    // Fall back to the static size while the animated one is being measured.
+    return textSizes[textKey(style)] ?? (clip.text ? (textSizes[textKey(clip.text)] ?? null) : null)
+  }
   const a = clip.asset_id ? assets.get(clip.asset_id) : undefined
   if (!a || !a.width || !a.height) return null
   return { width: a.width, height: a.height }
@@ -35,7 +41,7 @@ export function layerOf(
   textSizes: Record<string, { width: number; height: number }>,
   time?: number,
 ): Layer | null {
-  const size = sourceSize(clip, assets, textSizes)
+  const size = sourceSize(clip, assets, textSizes, time)
   const tr = time === undefined ? clip.transform : transformAt(clip, time)
   if (!size) return null
   const cw = size.width * Math.max(0.01, 1 - clip.crop.left - clip.crop.right)

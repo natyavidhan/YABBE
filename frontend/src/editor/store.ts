@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { AnimProp, Asset, Clip, ClipType, Ease, Project, ProjectSettings, TextStyle, Timeline, Track, TrackKind } from '../api/types'
 import { clamp, uid } from '../lib/format'
-import { framesOf, keyIndexAt, localTime, propAt, shiftKeyframes, staticValue, upsertKey } from './keyframes'
+import { colorPropAt, framesOf, isColorProp, keyIndexAt, localTime, propAt, shiftKeyframes, staticColor, staticValue, TEXT_COLOR, TEXT_NUMERIC, upsertKey } from './keyframes'
 
 /** The user-editable part of a project (what undo/redo and autosave cover). */
 export interface Doc {
@@ -81,7 +81,7 @@ interface EditorState {
   updateSettings: (s: Partial<ProjectSettings>) => void
   updateClip: (id: string, patch: ClipPatch) => void
   /** Set animatable values at the playhead: keys them if animated, else static. */
-  setProps: (id: string, values: Partial<Record<AnimProp, number>>) => void
+  setProps: (id: string, values: Partial<Record<AnimProp, number | string | null>>) => void
   /** Add a keyframe at the playhead (current value), or remove the one there. */
   toggleKey: (id: string, prop: AnimProp) => void
   setKeyEase: (id: string, ease: Ease) => void
@@ -110,6 +110,19 @@ const emptyDoc: Doc = {
   settings: { width: 1920, height: 1080, fps: 30, background: '#000000' },
   tracks: [],
   clips: [],
+}
+
+/** Set a property's static (non-animated) value. */
+function withStatic(c: Clip, prop: AnimProp, v: number | string | null): Clip {
+  if (prop === 'volume') return { ...c, volume: v as number }
+  const numField = TEXT_NUMERIC[prop]
+  const colorField = TEXT_COLOR[prop]
+  if (numField || colorField) {
+    if (!c.text) return c
+    const value = numField && ['size', 'stroke_width', 'padding'].includes(numField) ? Math.round(v as number) : v
+    return { ...c, text: { ...c.text, [(numField ?? colorField)!]: value } }
+  }
+  return { ...c, transform: { ...c.transform, [prop]: v as number } }
 }
 
 export const clipEnd = (c: Clip) => c.start + c.duration
@@ -291,13 +304,12 @@ export const useEditor = create<EditorState>((set, get) => {
         clips.map((c) => {
           if (c.id !== id) return c
           let next = c
-          for (const [prop, v] of Object.entries(values) as [AnimProp, number][]) {
+          for (const [prop, v] of Object.entries(values) as [AnimProp, number | string | null][]) {
             const frames = framesOf(next, prop)
-            if (frames) {
+            if (frames && v !== null) {
               const u = localTime(next, playhead, fps)
               next = { ...next, keyframes: { ...next.keyframes, [prop]: upsertKey(frames, u, v, fps) } }
-            } else if (prop === 'volume') next = { ...next, volume: v }
-            else next = { ...next, transform: { ...next.transform, [prop]: v } }
+            } else next = withStatic(next, prop, v)
           }
           return next
         }),
@@ -319,14 +331,14 @@ export const useEditor = create<EditorState>((set, get) => {
             if (!rest.length) {
               // Last key removed: keep the value it had as the static value.
               delete keyframes[prop]
-              const v = frames[i].v
-              return prop === 'volume'
-                ? { ...c, keyframes, volume: v }
-                : { ...c, keyframes, transform: { ...c.transform, [prop]: v } }
+              return withStatic({ ...c, keyframes }, prop, isColorProp(prop) ? (frames[i].c ?? null) : frames[i].v)
             }
             return { ...c, keyframes }
           }
-          const v = frames ? propAt(c, prop, playhead) : staticValue(c, prop)
+          const v = isColorProp(prop)
+            ? frames ? colorPropAt(c, prop, playhead) : staticColor(c, prop)
+            : frames ? propAt(c, prop, playhead) : staticValue(c, prop)
+          if (v === null) return c // e.g. no text box to animate
           return { ...c, keyframes: { ...c.keyframes, [prop]: upsertKey(frames, u, v, fps) } }
         }),
       )
@@ -359,9 +371,9 @@ export const useEditor = create<EditorState>((set, get) => {
           for (const p of props) {
             if (!framesOf(c, p)) continue
             // Freeze the value currently shown so nothing jumps.
-            const v = propAt(c, p, playhead)
+            const v = isColorProp(p) ? colorPropAt(c, p, playhead) : propAt(c, p, playhead)
             delete next.keyframes[p]
-            next = p === 'volume' ? { ...next, volume: v } : { ...next, transform: { ...next.transform, [p]: v } }
+            next = withStatic(next, p, v)
           }
           return next
         }),

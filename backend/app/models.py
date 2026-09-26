@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from typing import Literal, Optional
@@ -109,8 +110,21 @@ class TextStyle(_Model):
 
 ClipType = Literal["video", "audio", "image", "text"]
 
-AnimProp = Literal["x", "y", "scale", "rotation", "opacity", "volume"]
-ANIM_PROPS: tuple[str, ...] = ("x", "y", "scale", "rotation", "opacity", "volume")
+AnimProp = Literal[
+    "x", "y", "scale", "rotation", "opacity", "volume",
+    # text clips: style properties (re-rasterised per frame when animated)
+    "text_size", "text_stroke_width", "text_padding", "text_line_spacing",
+    "text_color", "text_stroke_color", "text_background",
+]
+ANIM_PROPS: tuple[str, ...] = AnimProp.__args__  # type: ignore[attr-defined]
+
+# Text style keys -> TextStyle field names.
+TEXT_NUMERIC_PROPS = {
+    "text_size": "size", "text_stroke_width": "stroke_width",
+    "text_padding": "padding", "text_line_spacing": "line_spacing",
+}
+TEXT_COLOR_PROPS = {"text_color": "color", "text_stroke_color": "stroke_color", "text_background": "background"}
+TEXT_INT_FIELDS = {"size", "stroke_width", "padding"}
 Ease = Literal["linear", "ease_in", "ease_out", "ease_in_out", "hold"]
 
 # Valid ranges for animated values (same limits as the static fields).
@@ -121,7 +135,13 @@ ANIM_LIMITS: dict[str, tuple[float, float]] = {
     "rotation": (-100_000, 100_000),
     "opacity": (0, 1),
     "volume": (0, 4),
+    "text_size": (4, 1000),
+    "text_stroke_width": (0, 100),
+    "text_padding": (0, 500),
+    "text_line_spacing": (0.5, 4),
 }
+
+HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$")
 
 
 class Keyframe(_Model):
@@ -130,7 +150,8 @@ class Keyframe(_Model):
     shapes the curve); ``ease`` shapes the segment from this keyframe to the next."""
 
     t: float
-    v: float
+    v: float = 0.0
+    c: Optional[str] = None  # colour value (#rrggbb[aa]) for colour properties
     ease: Ease = "linear"
 
 
@@ -160,11 +181,17 @@ class Clip(_Model):
         for prop, frames in value.items():
             if not frames:
                 continue
-            lo, hi = ANIM_LIMITS[prop]
             by_time: dict[float, Keyframe] = {}
             for k in frames:  # one keyframe per time (last wins), values clamped
-                by_time[round(k.t, 6)] = Keyframe(t=k.t, v=min(hi, max(lo, k.v)), ease=k.ease)
-            out[prop] = sorted(by_time.values(), key=lambda k: k.t)
+                if prop in TEXT_COLOR_PROPS:
+                    if not k.c or not HEX_COLOR.match(k.c):
+                        continue
+                    by_time[round(k.t, 6)] = Keyframe(t=k.t, c=k.c.lower(), ease=k.ease)
+                else:
+                    lo, hi = ANIM_LIMITS[prop]
+                    by_time[round(k.t, 6)] = Keyframe(t=k.t, v=min(hi, max(lo, k.v)), ease=k.ease)
+            if by_time:
+                out[prop] = sorted(by_time.values(), key=lambda k: k.t)
         return out
 
     def animated(self, prop: str) -> Optional[list[Keyframe]]:
@@ -173,6 +200,12 @@ class Clip(_Model):
 
     def static_value(self, prop: str) -> float:
         return self.volume if prop == "volume" else float(getattr(self.transform, prop))
+
+    @property
+    def text_animated(self) -> bool:
+        return self.type == "text" and any(
+            self.animated(p) for p in (*TEXT_NUMERIC_PROPS, *TEXT_COLOR_PROPS)
+        )
 
     @property
     def end(self) -> float:

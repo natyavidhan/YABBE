@@ -73,13 +73,28 @@ export interface TextStyle {
 
 export type ClipType = 'video' | 'audio' | 'image' | 'text'
 
-export type AnimProp = 'x' | 'y' | 'scale' | 'rotation' | 'opacity' | 'volume'
+export type AnimProp =
+  | 'x'
+  | 'y'
+  | 'scale'
+  | 'rotation'
+  | 'opacity'
+  | 'volume'
+  | 'text_size'
+  | 'text_stroke_width'
+  | 'text_padding'
+  | 'text_line_spacing'
+  | 'text_color'
+  | 'text_stroke_color'
+  | 'text_background'
 export type Ease = 'linear' | 'ease_in' | 'ease_out' | 'ease_in_out' | 'hold'
 
 /** ``t`` is seconds from the clip's start; ``ease`` shapes the segment to the next key. */
 export interface Keyframe {
   t: number
   v: number
+  /** Colour value (#rrggbb[aa]) for colour properties. */
+  c?: string | null
   ease: Ease
 }
 

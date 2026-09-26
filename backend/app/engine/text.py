@@ -124,3 +124,53 @@ def render_text(style: TextStyle) -> tuple[Path, int, int]:
 def measure(style: TextStyle) -> tuple[int, int]:
     _, w, h = render_text(style)
     return w, h
+
+
+def animated_sequence(styles: list[TextStyle], fps: float) -> tuple[Path, int, int]:
+    """Rasterise one image per frame (``styles[i]`` is frame ``i``), centred on
+    a fixed transparent canvas, and write an ffconcat list playing them at
+    ``fps``. Identical consecutive frames are merged. Returns (list, w, h).
+    """
+    rendered = {}
+    for st in styles:
+        k = text_key(st)
+        if k not in rendered:
+            rendered[k] = render_text(st)
+    cw = max(w for _, w, _ in rendered.values())
+    ch = max(h for _, _, h in rendered.values())
+    cw, ch = cw + cw % 2, ch + ch % 2
+
+    pad_dir = _cache_dir() / "pad"
+    pad_dir.mkdir(exist_ok=True)
+    padded: dict[str, Path] = {}
+    for k, (png, w, h) in rendered.items():
+        out = pad_dir / f"{k}_{cw}x{ch}.png"
+        if not out.is_file():
+            canvas = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+            with Image.open(png) as im:
+                canvas.paste(im, ((cw - w) // 2, (ch - h) // 2))
+            tmp = out.with_suffix(f".{threading.get_ident()}.png")
+            canvas.save(tmp, "PNG")
+            tmp.replace(out)
+        padded[k] = out
+
+    runs: list[list] = []  # [path, frame_count]
+    for st in styles:
+        p = padded[text_key(st)]
+        if runs and runs[-1][0] == p:
+            runs[-1][1] += 1
+        else:
+            runs.append([p, 1])
+    lines = ["ffconcat version 1.0"]
+    for p, n in runs:
+        lines += [f"file '{p}'", f"duration {n / fps:.6f}"]
+    lines.append(f"file '{runs[-1][0]}'")  # concat demuxer needs the last file repeated
+    body = "\n".join(lines) + "\n"
+    lst_dir = config.DATA_DIR / "cache" / "cmd"
+    lst_dir.mkdir(parents=True, exist_ok=True)
+    lst = lst_dir / (hashlib.sha1(body.encode()).hexdigest()[:20] + ".ffconcat")
+    if not lst.is_file():
+        tmp = lst.with_suffix(".tmp")
+        tmp.write_text(body)
+        tmp.replace(lst)
+    return lst, cw, ch

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
-from ..models import Keyframe
+from ..models import TEXT_COLOR_PROPS, TEXT_INT_FIELDS, TEXT_NUMERIC_PROPS, Clip, Keyframe, TextStyle
 
 
 def _num(v: float) -> str:
@@ -77,3 +77,44 @@ def value_range(frames: Sequence[Keyframe]) -> tuple[float, float]:
     """Min/max the curve reaches (eased curves never overshoot the keys)."""
     vs = [k.v for k in frames]
     return min(vs), max(vs)
+
+
+# -- colours ----------------------------------------------------------------------------
+
+
+def _rgba(c: str) -> tuple[int, int, int, int]:
+    c = c.lstrip("#")
+    a = int(c[6:8], 16) if len(c) == 8 else 255
+    return int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16), a
+
+
+def color_at(frames: Sequence[Keyframe], u: float) -> str:
+    """Per-channel (RGBA) interpolation of colour keyframes."""
+    def fmt(ch):
+        return "#" + "".join(f"{max(0, min(255, round(x))):02x}" for x in ch)
+
+    if u <= frames[0].t:
+        return fmt(_rgba(frames[0].c or "#ffffff"))
+    for a, b in zip(frames, frames[1:]):
+        if u < b.t:
+            span = b.t - a.t
+            p = ease(a.ease, (u - a.t) / span if span > 0 else 1.0)
+            ca, cb = _rgba(a.c or "#ffffff"), _rgba(b.c or "#ffffff")
+            return fmt(tuple(x + (y - x) * p for x, y in zip(ca, cb)))
+    return fmt(_rgba(frames[-1].c or "#ffffff"))
+
+
+def text_style_at(clip: Clip, u: float) -> TextStyle:
+    """The clip's text style with style keyframes evaluated at time ``u``."""
+    assert clip.text is not None
+    updates: dict = {}
+    for prop, field in TEXT_NUMERIC_PROPS.items():
+        frames = clip.animated(prop)
+        if frames:
+            v = value_at(frames, u)
+            updates[field] = int(round(v)) if field in TEXT_INT_FIELDS else round(v, 3)
+    for prop, field in TEXT_COLOR_PROPS.items():
+        frames = clip.animated(prop)
+        if frames:
+            updates[field] = color_at(frames, u)
+    return clip.text.model_copy(update=updates) if updates else clip.text

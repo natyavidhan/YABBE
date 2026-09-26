@@ -26,7 +26,7 @@ import type { AnimProp, Asset, Clip, Ease } from '../api/types'
 import { IconButton, inputClass, NumberInput } from '../components/ui'
 import { formatDuration } from '../lib/format'
 import { fillScale, sourceSize } from './geometry'
-import { allKeyTimes, EASES, framesOf, keyIndexAt, localTime, propAt } from './keyframes'
+import { allKeyTimes, EASES, framesOf, keyIndexAt, localTime, propAt, textStyleAt } from './keyframes'
 import { ProjectSettingsForm } from './ProjectSettings'
 import { clipEnd, maxClipDuration, MIN_CLIP, overlaps, useEditor, type ClipPatch } from './store'
 
@@ -103,7 +103,7 @@ function Section({
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="grid grid-cols-[72px_1fr] items-center gap-2">
+    <div className="grid grid-cols-[84px_1fr] items-center gap-2">
       <span className="text-xs text-muted">{label}</span>
       <div className="min-w-0">{children}</div>
     </div>
@@ -236,7 +236,7 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
       </div>
       {locked && <div className="bg-warn/10 px-3 py-2 text-xs text-warn">This clip is on a locked track.</div>}
 
-      {clip.type === 'text' && clip.text && <TextSection clip={clip} set={set} />}
+      {clip.type === 'text' && clip.text && <TextSection clip={clip} set={set} locked={locked} />}
 
       <Section icon={<Timer size={14} />} title="Timing">
         <div className="grid grid-cols-2 gap-2">
@@ -531,11 +531,28 @@ const typeBadge: Record<Clip['type'], string> = {
 
 let fontsPromise: Promise<string[]> | null = null
 
-function TextSection({ clip, set }: { clip: Clip; set: (p: ClipPatch) => void }) {
+function TextSection({ clip, set, locked }: { clip: Clip; set: (p: ClipPatch) => void; locked: boolean }) {
   const t = clip.text!
   const [fonts, setFonts] = useState<string[]>([])
   const [draft, setDraft] = useState(t.content)
   const { beginGesture, endGesture } = useEditor.getState()
+  // Style values shown at the playhead; animated ones auto-key when edited.
+  const playhead = useEditor((st) => st.playhead)
+  const ts = textStyleAt(clip, playhead) ?? t
+  const setP = (values: Partial<Record<AnimProp, number | string | null>>) => {
+    if (!locked) useEditor.getState().setProps(clip.id, values)
+  }
+  const key = (p: AnimProp, disabled = false) => <KeyButton clip={clip} prop={p} disabled={locked || disabled} />
+  const bg = ts.background
+  const bgAlpha = bg ? bg.slice(7) || 'ff' : 'ff'
+  const alphaOptions = [
+    ['ff', '100%'],
+    ['cc', '80%'],
+    ['aa', '67%'],
+    ['80', '50%'],
+    ['55', '33%'],
+    ['00', '0%'],
+  ]
 
   useEffect(() => {
     fontsPromise ??= api.fonts().catch(() => [])
@@ -572,9 +589,6 @@ function TextSection({ clip, set }: { clip: Clip; set: (p: ClipPatch) => void })
       </Row>
       <Row label="Style">
         <div className="flex items-center gap-1">
-          <div className="w-20">
-            <NumberInput value={t.size} onChange={(size) => set({ text: { size: Math.round(size) } })} min={4} max={1000} step={1} precision={0} suffix="px" onScrubStart={beginGesture} onScrubEnd={endGesture} />
-          </div>
           <IconButton label="Bold" active={t.bold} onClick={() => set({ text: { bold: !t.bold } })}>
             <Bold size={14} />
           </IconButton>
@@ -589,49 +603,96 @@ function TextSection({ clip, set }: { clip: Clip; set: (p: ClipPatch) => void })
           ))}
         </div>
       </Row>
+      <Row label="Size">
+        <div className="flex items-center gap-1">
+          <div className="w-24">
+            <NumberInput value={ts.size} onChange={(size) => setP({ text_size: Math.round(size) })} min={4} max={1000} step={1} precision={0} suffix="px" onScrubStart={beginGesture} onScrubEnd={endGesture} />
+          </div>
+          {key('text_size')}
+        </div>
+      </Row>
       <Row label="Colour">
-        <ColorInput value={t.color} onChange={(color) => set({ text: { color } })} />
+        <div className="flex items-center gap-1">
+          <ColorInput value={ts.color} onChange={(color) => setP({ text_color: color })} />
+          {key('text_color')}
+        </div>
       </Row>
       <Row label="Outline">
-        <div className="flex items-center gap-2">
-          <ColorInput value={t.stroke_color} onChange={(stroke_color) => set({ text: { stroke_color } })} />
-          <div className="w-20">
-            <NumberInput value={t.stroke_width} onChange={(v) => set({ text: { stroke_width: Math.round(v) } })} min={0} max={100} step={1} precision={0} suffix="px" />
+        <div className="flex items-center gap-1">
+          <ColorInput value={ts.stroke_color} onChange={(c) => setP({ text_stroke_color: c })} />
+          {key('text_stroke_color')}
+        </div>
+      </Row>
+      <Row label="Outline width">
+        <div className="flex items-center gap-1">
+          <div className="w-24">
+            <NumberInput value={ts.stroke_width} onChange={(v) => setP({ text_stroke_width: Math.round(v) })} min={0} max={100} step={1} precision={0} suffix="px" onScrubStart={beginGesture} onScrubEnd={endGesture} />
           </div>
+          {key('text_stroke_width')}
         </div>
       </Row>
       <Row label="Box">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <input
             type="checkbox"
-            checked={t.background !== null}
-            onChange={(e) => set({ text: { background: e.target.checked ? '#000000aa' : null } })}
-            className="accent-accent"
+            checked={bg !== null}
+            onChange={(e) => {
+              if (e.target.checked) set({ text: { background: '#000000aa' } })
+              else {
+                // Turning the box off also drops its colour animation.
+                const keyframes = { ...clip.keyframes }
+                delete keyframes.text_background
+                set({ text: { background: null }, keyframes })
+              }
+            }}
+            className="mr-1 accent-accent"
             aria-label="Background box"
           />
-          {t.background !== null && (
+          {bg !== null && (
             <>
-              <ColorInput value={t.background.slice(0, 7)} onChange={(c) => set({ text: { background: c + (t.background!.slice(7) || '') } })} />
+              <ColorInput value={bg.slice(0, 7)} onChange={(c) => setP({ text_background: c + bgAlpha })} />
               <select
                 className="h-7 rounded-md border border-line bg-bg px-1 text-xs"
-                value={t.background.slice(7) || 'ff'}
-                onChange={(e) => set({ text: { background: t.background!.slice(0, 7) + e.target.value } })}
+                value={bgAlpha}
+                onChange={(e) => setP({ text_background: bg.slice(0, 7) + e.target.value })}
                 aria-label="Box opacity"
               >
-                <option value="ff">100%</option>
-                <option value="cc">80%</option>
-                <option value="aa">67%</option>
-                <option value="80">50%</option>
-                <option value="55">33%</option>
+                {!alphaOptions.some(([v]) => v === bgAlpha) && (
+                  <option value={bgAlpha}>{Math.round((parseInt(bgAlpha, 16) / 255) * 100)}%</option>
+                )}
+                {alphaOptions.map(([v, l]) => (
+                  <option key={v} value={v}>
+                    {l}
+                  </option>
+                ))}
               </select>
-              <div className="w-16">
-                <NumberInput value={t.padding} onChange={(v) => set({ text: { padding: Math.round(v) } })} min={0} max={500} step={1} precision={0} suffix="px" />
-              </div>
+              {key('text_background')}
             </>
           )}
         </div>
       </Row>
-      <SliderRow label="Spacing" value={t.line_spacing} min={0.5} max={3} step={0.05} precision={2} suffix="×" onChange={(line_spacing) => set({ text: { line_spacing } })} />
+      {bg !== null && (
+        <Row label="Padding">
+          <div className="flex items-center gap-1">
+            <div className="w-24">
+              <NumberInput value={ts.padding} onChange={(v) => setP({ text_padding: Math.round(v) })} min={0} max={500} step={1} precision={0} suffix="px" onScrubStart={beginGesture} onScrubEnd={endGesture} />
+            </div>
+            {key('text_padding')}
+          </div>
+        </Row>
+      )}
+      <SliderRow
+        label="Spacing"
+        after={key('text_line_spacing')}
+        value={ts.line_spacing}
+        min={0.5}
+        max={3}
+        step={0.05}
+        precision={2}
+        suffix="×"
+        onChange={(line_spacing) => setP({ text_line_spacing: line_spacing })}
+      />
+      <KeyframeBar clip={clip} disabled={locked} />
     </Section>
   )
 }

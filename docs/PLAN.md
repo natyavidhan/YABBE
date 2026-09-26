@@ -51,8 +51,9 @@ FFmpeg on the server.
                 "crop": { "left", "top", "right", "bottom" },      // fractions 0..1
                 "text": { "content", "font", "size", "color", "background",
                           "stroke_color", "stroke_width", "align", "bold", "italic" },
-                "keyframes": { "x|y|scale|rotation|opacity|volume":
-                               [ { "t": 0.0, "v": 1.0, "ease": "linear|ease_in|ease_out|ease_in_out|hold" } ] } } ]
+                "keyframes": { "x|y|scale|rotation|opacity|volume|text_size|text_stroke_width|
+                                text_padding|text_line_spacing":  [ { "t", "v", "ease" } ],
+                               "text_color|text_stroke_color|text_background": [ { "t", "c": "#rrggbbaa", "ease" } ] } } ]
 }
 ```
 
@@ -67,6 +68,9 @@ FFmpeg on the server.
   scale → per-frame `scale` padded to a fixed canvas, rotation → `rotate`
   expression, opacity → `sendcmd` driving `colorchannelmixer`, volume →
   `volume` expression. Single frames evaluate the curve in Python instead.
+  Text style keyframes re-rasterise the text with Pillow for every frame whose
+  style differs (cached), centred on a fixed transparent canvas, and feed the
+  frames to FFmpeg through an ffconcat list.
 
 ## v1 feature list
 
@@ -101,6 +105,7 @@ Ops
 - [x] Dev: `uvicorn` + `vite` with proxy
 
 - [x] Keyframes for position, scale, rotation, opacity and volume with easing
+- [x] Text style keyframes: size, colours, outline width, box, padding, spacing
 
 ## Later
 Transitions, keyframable crop/colour, effects/filters (colour, blur), audio ducking, captions

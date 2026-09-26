@@ -92,20 +92,22 @@ def ffmpeg_color(color: str) -> str:
     return "black"
 
 
-def source_size(project: Project, clip: Clip) -> Optional[tuple[int, int]]:
+def source_size(project: Project, clip: Clip, u: float = 0.0) -> Optional[tuple[int, int]]:
     if clip.type == "text":
         if clip.text is None:
             return None
-        return text.measure(clip.text)
+        return text.measure(keyframes.text_style_at(clip, u))
     asset = project.asset(clip.asset_id)
     if asset is None or not asset.width or not asset.height:
         return None
     return asset.width, asset.height
 
 
-def base_size(project: Project, clip: Clip) -> Optional[tuple[float, float]]:
+def base_size(
+    project: Project, clip: Clip, u: float = 0.0, size: Optional[tuple[int, int]] = None
+) -> Optional[tuple[float, float]]:
     """Layer size at scale 1: cropped source, contain-fitted (text: natural size)."""
-    size = source_size(project, clip)
+    size = size or source_size(project, clip, u)
     if size is None:
         return None
     sw, sh = size
@@ -117,7 +119,7 @@ def base_size(project: Project, clip: Clip) -> Optional[tuple[float, float]]:
 
 def layer_geometry(project: Project, clip: Clip, u: float = 0.0) -> Optional[LayerGeometry]:
     """Geometry at clip-local time ``u`` (keyframes applied)."""
-    base = base_size(project, clip)
+    base = base_size(project, clip, u)
     if base is None:
         return None
     val = lambda p: prop_value(clip, p, u)  # noqa: E731
@@ -245,11 +247,22 @@ def build(project: Project, win: Window) -> Graph:
 
         # ---- input ----------------------------------------------------------------
         idx: Optional[int] = None
+        text_canvas: Optional[tuple[int, int]] = None
         if clip.type == "text":
             if clip.text is None:
                 continue
-            png, _, _ = text.render_text(clip.text)
-            idx = g.add_input("-loop", "1", "-framerate", _num(fps), "-t", _num(vis.length + 1 / fps), "-i", str(png))
+            if clip.text_animated and not single_frame:
+                # Style keyframes: one raster per frame on a fixed-size canvas.
+                n = max(1, math.ceil(vis.length * fps)) + 1
+                styles = [keyframes.text_style_at(clip, vis.into + i / fps) for i in range(n)]
+                seq, cw, ch = text.animated_sequence(styles, fps)
+                text_canvas = (cw, ch)
+                idx = g.add_input("-f", "concat", "-safe", "0", "-i", str(seq))
+            else:
+                png, _, _ = text.render_text(keyframes.text_style_at(clip, vis.into))
+                idx = g.add_input(
+                    "-loop", "1", "-framerate", _num(fps), "-t", _num(vis.length + 1 / fps), "-i", str(png)
+                )
         elif asset is not None:
             path = _path_for(project, asset, win)
             if path is None:
@@ -265,7 +278,7 @@ def build(project: Project, win: Window) -> Graph:
 
         # ---- video ----------------------------------------------------------------
         if wants_video and (asset is None or asset.has_video or asset.kind == "image" or clip.type == "text"):
-            base = base_size(project, clip)
+            base = base_size(project, clip, vis.into, text_canvas)
             if base is not None:
                 label = f"v{idx}"
                 # Clip-local time as a function of the filter's t (window-relative).
