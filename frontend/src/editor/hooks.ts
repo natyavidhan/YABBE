@@ -133,6 +133,13 @@ export function useShortcuts() {
       if (e.key === 'F9') {
         if (!runEasyEase(mod && e.shiftKey ? 'out' : e.shiftKey ? 'in' : 'both'))
           toast.info('Put the playhead on a keyframe of the selected clip (or select keys in the graph)')
+      } else if (mod && key === 'l') {
+        const n = e.shiftKey ? s.unlinkSelected() : s.linkSelected()
+        toast.info(
+          e.shiftKey
+            ? n ? `Unlinked ${n} clip${n === 1 ? '' : 's'}` : 'No linked clips selected'
+            : n ? `Linked ${n} clips` : 'Select two or more clips to link',
+        )
       } else if (mod && key === 'z' && !e.shiftKey) s.undo()
       else if (mod && ((key === 'z' && e.shiftKey) || key === 'y')) s.redo()
       else if (mod && key === 'd') s.duplicateSelected()

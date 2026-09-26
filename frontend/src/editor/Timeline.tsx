@@ -5,6 +5,8 @@ import {
   ChartSpline,
   ArrowRightLeft,
   Eye,
+  Link2,
+  Unlink2,
   EyeOff,
   Flag,
   Lock,
@@ -29,7 +31,8 @@ import { clamp } from '../lib/format'
 import { isTouchEvent, useIsMobile } from '../lib/useMedia'
 import { allKeyTimes, shiftKeyframes, shiftMarkers, visibleMarkers } from './keyframes'
 import { ASSET_MIME } from './MediaBin'
-import { allMarkers, clipEnd, cuts, docDuration, maxClipDuration, MIN_CLIP, overlaps, transitionLength, useEditor } from './store'
+import { allMarkers, clipEnd, cuts, docDuration, maxClipDuration, MIN_CLIP, overlaps, transitionLength, useEditor, withLinked } from './store'
+import { ContextMenu } from '../components/ContextMenu'
 import { useTransitionCatalog } from './transitionCatalog'
 
 const HEADER_W = 176
@@ -47,6 +50,8 @@ type DragState =
       startY: number
       originals: Map<string, { start: number; track_id: string }>
       active: boolean
+      /** Alt held: act on the clicked clip alone, ignoring links. */
+      single?: boolean
     }
   | { kind: 'trim-start' | 'trim-end'; id: string; startX: number; original: Clip; active: boolean }
 
@@ -287,7 +292,12 @@ export function Timeline({ projectId }: { projectId: string }) {
   const onUp = useCallback(() => {
     const d = drag.current
     if (d?.active) useEditor.getState().endGesture()
-    else if (d?.kind === 'move' && d.originals.size > 1) useEditor.getState().select([d.primary])
+    else if (d?.kind === 'move' && d.originals.size > 1) {
+      // A click (no drag) on a clip in a multi-selection narrows to that clip's link group.
+      const st = useEditor.getState()
+      const group = d.single ? [d.primary] : withLinked([d.primary], st.doc.clips)
+      if (group.length < d.originals.size) st.select(group)
+    }
     drag.current = null
     setSnapLine(null)
     window.removeEventListener('pointermove', onMove)
@@ -307,8 +317,11 @@ export function Timeline({ projectId }: { projectId: string }) {
     e.stopPropagation()
     const s = useEditor.getState()
     const track = s.doc.tracks.find((t) => t.id === clip.track_id)
+    const group = e.altKey ? [clip.id] : withLinked([clip.id], s.doc.clips)
     if (e.shiftKey) {
-      s.toggleSelect(clip.id)
+      // Toggle the clip (and its linked clips) in the selection.
+      const on = s.selection.includes(clip.id)
+      s.select(on ? s.selection.filter((id) => !group.includes(id)) : [...new Set([...s.selection, ...group])])
       return
     }
     if (isTouchEvent(e) && part === 'body') {
@@ -340,8 +353,8 @@ export function Timeline({ projectId }: { projectId: string }) {
         window.removeEventListener('pointerup', finish)
         window.removeEventListener('pointercancel', finish)
         const st = useEditor.getState()
-        if (!moved && !longPressed && (!wasSelected || st.selection.length > 1) && !drag.current?.active)
-          st.select([clip.id])
+        if (!moved && !longPressed && (!wasSelected || st.selection.length > group.length) && !drag.current?.active)
+          st.select(group)
       }
       window.addEventListener('pointermove', watch)
       window.addEventListener('pointerup', finish)
@@ -357,8 +370,12 @@ export function Timeline({ projectId }: { projectId: string }) {
       return
     }
     let sel = s.selection
-    if (!sel.includes(clip.id)) {
-      sel = [clip.id]
+    if (!sel.includes(clip.id) || e.altKey) {
+      sel = group
+      s.select(sel)
+    } else if (group.some((id) => !sel.includes(id))) {
+      // Clicking a linked clip always brings its whole group into the selection.
+      sel = [...new Set([...sel, ...group])]
       s.select(sel)
     }
     if (track?.locked) return
@@ -369,7 +386,7 @@ export function Timeline({ projectId }: { projectId: string }) {
           .filter((c) => sel.includes(c.id) && !lockedTracks.has(c.track_id))
           .map((c) => [c.id, { start: c.start, track_id: c.track_id }]),
       )
-      beginDrag({ kind: 'move', primary: clip.id, startX: e.clientX, startY: e.clientY, originals, active: false })
+      beginDrag({ kind: 'move', primary: clip.id, startX: e.clientX, startY: e.clientY, originals, active: false, single: e.altKey })
     } else {
       s.select([clip.id])
       beginDrag({ kind: part === 'start' ? 'trim-start' : 'trim-end', id: clip.id, startX: e.clientX, original: clip, active: false })
@@ -390,17 +407,68 @@ export function Timeline({ projectId }: { projectId: string }) {
   }
 
   const lastLanePointer = useRef('mouse')
+  const contentRef = useRef<HTMLDivElement>(null)
+  const [marquee, setMarquee] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const onLaneDown = (e: React.PointerEvent) => {
     lastLanePointer.current = e.pointerType
     if (e.button !== 0 || isTouchEvent(e)) return // touch: handled as a tap in onLaneClick
-    if (!e.shiftKey) useEditor.getState().select([])
-    scrub(e)
+    e.preventDefault() // no text selection while dragging
+    const content = contentRef.current!
+    const rel = (ev: { clientX: number; clientY: number }) => {
+      const r = content.getBoundingClientRect()
+      return { x: ev.clientX - r.left, y: ev.clientY - r.top }
+    }
+    const start = rel(e)
+    const base = e.shiftKey ? useEditor.getState().selection : []
+    let active = false
+    const move = (ev: PointerEvent) => {
+      const p = rel(ev)
+      if (!active && Math.hypot(p.x - start.x, p.y - start.y) < 4) return
+      active = true
+      const box = { x0: Math.min(start.x, p.x), x1: Math.max(start.x, p.x), y0: Math.min(start.y, p.y), y1: Math.max(start.y, p.y) }
+      setMarquee(box)
+      const st = useEditor.getState()
+      const t0 = (box.x0 - headerRef.current) / st.zoom
+      const t1 = (box.x1 - headerRef.current) / st.zoom
+      // Tracks whose rows the box touches (lanes start below the ruler).
+      const hit = new Set<string>()
+      let y = RULER_H
+      for (const t of st.doc.tracks) {
+        const h = TRACK_H[t.kind]
+        if (box.y1 >= y && box.y0 <= y + h) hit.add(t.id)
+        y += h
+      }
+      const ids = st.doc.clips
+        .filter((c) => hit.has(c.track_id) && c.start < t1 && clipEnd(c) > t0)
+        .map((c) => c.id)
+      st.select(withLinked([...new Set([...base, ...ids])], st.doc.clips))
+    }
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      setMarquee(null)
+      if (!active) {
+        const st = useEditor.getState()
+        if (!ev.shiftKey) st.select([])
+        st.setPlayhead(timeAt(ev.clientX))
+      }
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
   }
   const onLaneClick = (e: React.MouseEvent) => {
     if (lastLanePointer.current === 'mouse' || e.target !== e.currentTarget) return
     const s = useEditor.getState()
     s.select([])
     s.setPlayhead(timeAt(e.clientX))
+  }
+
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const onClipContextMenu = (e: React.MouseEvent, clip: Clip) => {
+    e.preventDefault()
+    const s = useEditor.getState()
+    if (!s.selection.includes(clip.id)) s.select(withLinked([clip.id], s.doc.clips))
+    setMenu({ x: e.clientX, y: e.clientY })
   }
 
   const onDrop = (e: React.DragEvent, track: Track) => {
@@ -421,10 +489,17 @@ export function Timeline({ projectId }: { projectId: string }) {
   const visible = { from: view.left / zoom - 1, to: (view.left + view.width) / zoom + 1 }
 
   return (
-    <div className="flex h-full flex-col bg-panel">
+    <div className="flex h-full flex-col bg-panel select-none" onContextMenu={(e) => e.preventDefault()}>
       <Toolbar compact={compact} />
+      {menu && <ClipMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} />}
       <div ref={scrollRef} className="relative min-h-0 flex-1 touch-pan-x touch-pan-y overflow-auto overscroll-contain">
-        <div className="relative" style={{ width: headerW + contentWidth, minHeight: '100%' }}>
+        <div ref={contentRef} className="relative" style={{ width: headerW + contentWidth, minHeight: '100%' }}>
+          {marquee && (
+            <div
+              className="pointer-events-none absolute z-30 rounded-sm border border-accent-2 bg-accent/15"
+              style={{ left: marquee.x0, top: marquee.y0, width: marquee.x1 - marquee.x0, height: marquee.y1 - marquee.y0 }}
+            />
+          )}
           {/* Ruler */}
           <div className="sticky top-0 z-20 flex" style={{ height: RULER_H }}>
             <div className="sticky left-0 z-30 shrink-0 border-r border-b border-line bg-panel" style={{ width: headerW }} />
@@ -467,6 +542,8 @@ export function Timeline({ projectId }: { projectId: string }) {
                         selected={selection.includes(c.id)}
                         locked={track.locked}
                         onDown={onClipDown}
+                        onContextMenu={onClipContextMenu}
+                        linked={!!c.link && clips.some((o) => o.id !== c.id && o.link === c.link)}
                         compact={compact}
                       />
                     ))}
@@ -700,6 +777,8 @@ function Toolbar({ compact }: { compact: boolean }) {
   const zoom = useEditor((s) => s.zoom)
   const snapping = useEditor((s) => s.snapping)
   const hasSelection = useEditor((s) => s.selection.length > 0)
+  const canLink = useEditor((s) => s.selection.length > 1)
+  const canUnlink = useEditor((s) => s.doc.clips.some((c) => c.link && s.selection.includes(c.id)))
   const graphOpen = useEditor((s) => s.graphOpen)
   const s = useEditor.getState()
   return (
@@ -712,6 +791,12 @@ function Toolbar({ compact }: { compact: boolean }) {
       </IconButton>
       <IconButton label="Delete (Del)" onClick={s.deleteSelected} disabled={!hasSelection}>
         <Trash2 size={15} />
+      </IconButton>
+      <IconButton label="Link selected clips (Ctrl+L)" onClick={() => s.linkSelected()} disabled={!canLink}>
+        <Link2 size={15} />
+      </IconButton>
+      <IconButton label="Unlink (Ctrl+Shift+L)" onClick={() => s.unlinkSelected()} disabled={!canUnlink}>
+        <Unlink2 size={15} />
       </IconButton>
       <IconButton
         label="Add marker to the selected clip (M)"
@@ -788,6 +873,8 @@ const TimelineClip = memo(function TimelineClip({
   selected,
   locked,
   onDown,
+  onContextMenu,
+  linked,
   compact,
 }: {
   projectId: string
@@ -798,6 +885,8 @@ const TimelineClip = memo(function TimelineClip({
   selected: boolean
   locked: boolean
   onDown: (e: React.PointerEvent, clip: Clip, part: 'body' | 'start' | 'end') => void
+  onContextMenu: (e: React.MouseEvent, clip: Clip) => void
+  linked: boolean
   compact: boolean
 }) {
   const left = clip.start * zoom
@@ -817,9 +906,11 @@ const TimelineClip = memo(function TimelineClip({
       // Selected clips capture touch (drag to move); others let the timeline scroll.
       style={{ left, width, height: height - 4, touchAction: selected ? 'none' : 'pan-x pan-y' }}
       onPointerDown={(e) => onDown(e, clip, 'body')}
-      title={label}
+      onContextMenu={(e) => onContextMenu(e, clip)}
+      title={linked ? `${label} (linked — Alt+click selects just this clip)` : label}
     >
       <div className="flex h-4 items-center gap-1 overflow-hidden px-1.5 text-[10px] leading-4 font-medium whitespace-nowrap text-white/95">
+        {linked && <Link2 size={10} className="shrink-0" aria-label="Linked" />}
         {clip.muted && <VolumeX size={10} />}
         <span className="truncate">{label}</span>
         {clip.speed !== 1 && <span className="rounded bg-black/30 px-0.5">{clip.speed}×</span>}
@@ -884,6 +975,50 @@ const TimelineClip = memo(function TimelineClip({
     </div>
   )
 })
+
+/** Right-click menu for the selected clips. */
+function ClipMenu({ x, y, onClose }: { x: number; y: number; onClose: () => void }) {
+  const s = useEditor.getState()
+  const sel = useEditor((st) => st.selection)
+  const clips = useEditor((st) => st.doc.clips)
+  const selected = clips.filter((c) => sel.includes(c.id))
+  const linkedSel = selected.filter((c) => c.link)
+  const allOneGroup = selected.length > 1 && linkedSel.length === selected.length && new Set(linkedSel.map((c) => c.link)).size === 1
+  return (
+    <ContextMenu
+      x={x}
+      y={y}
+      onClose={onClose}
+      items={[
+        {
+          label: `Link ${selected.length} clips`,
+          icon: <Link2 size={13} />,
+          shortcut: 'Ctrl+L',
+          disabled: selected.length < 2 || allOneGroup,
+          onSelect: () => s.linkSelected(),
+        },
+        {
+          label: 'Unlink',
+          icon: <Unlink2 size={13} />,
+          shortcut: 'Ctrl+Shift+L',
+          disabled: !linkedSel.length,
+          onSelect: () => s.unlinkSelected(),
+        },
+        'divider',
+        { label: 'Split at playhead', icon: <Scissors size={13} />, shortcut: 'S', onSelect: () => s.splitAtPlayhead() },
+        { label: 'Duplicate', icon: <Copy size={13} />, shortcut: 'Ctrl+D', onSelect: () => s.duplicateSelected() },
+        'divider',
+        {
+          label: selected.length > 1 ? `Delete ${selected.length} clips` : 'Delete',
+          icon: <Trash2 size={13} />,
+          shortcut: 'Del',
+          danger: true,
+          onSelect: () => s.deleteSelected(),
+        },
+      ]}
+    />
+  )
+}
 
 /** A cut between two touching clips: add a transition (+) or show the existing one. */
 function CutMarker({

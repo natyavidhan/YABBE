@@ -124,6 +124,10 @@ interface EditorState {
   fitClipDuration: (id: string, seconds: number) => number
   /** Add a marker at the playhead on the selected clip; returns an error message or null. */
   addMarker: () => string | null
+  /** Link the selected clips into one group (returns how many were linked). */
+  linkSelected: () => number
+  /** Remove the selected clips from their link groups. */
+  unlinkSelected: () => number
   updateMarker: (clipId: string, markerId: string, patch: Partial<Omit<Marker, 'id'>>) => void
   removeMarker: (clipId: string, markerId: string) => void
   addAssetClip: (asset: Asset, opts?: { trackId?: string; start?: number }) => string | null
@@ -503,6 +507,30 @@ export const useEditor = create<EditorState>((set, get) => {
       return get().setClipSpeed(id, (clip.duration * clip.speed) / seconds)
     },
 
+    linkSelected: () => {
+      const { selection } = get()
+      if (selection.length < 2) return 0
+      const id = uid('l_')
+      const sel = new Set(selection)
+      setClips((clips) => clips.map((c) => (sel.has(c.id) ? { ...c, link: id } : c)))
+      return selection.length
+    },
+
+    unlinkSelected: () => {
+      const { selection, doc } = get()
+      const sel = new Set(selection)
+      const n = doc.clips.filter((c) => sel.has(c.id) && c.link).length
+      if (!n) return 0
+      setClips((clips) => {
+        const next = clips.map((c) => (sel.has(c.id) ? { ...c, link: null } : c))
+        // A group left with a single member isn't a link any more.
+        const count = new Map<string, number>()
+        for (const c of next) if (c.link) count.set(c.link, (count.get(c.link) ?? 0) + 1)
+        return next.map((c) => (c.link && count.get(c.link) === 1 ? { ...c, link: null } : c))
+      })
+      return n
+    },
+
     addMarker: () => {
       const { selection, doc, playhead } = get()
       if (selection.length !== 1) return 'Select one clip to add a marker to'
@@ -601,6 +629,7 @@ export const useEditor = create<EditorState>((set, get) => {
       if (!targets.length) return
       const ids = new Set(targets.map((c) => c.id))
       const newSel: string[] = []
+      const rightLink = new Map<string, string>() // right halves of a linked group form their own group
       setClips((clips) =>
         clips.flatMap((c) => {
           if (!ids.has(c.id)) return [c]
@@ -616,6 +645,7 @@ export const useEditor = create<EditorState>((set, get) => {
             fade_in: 0,
             keyframes: shiftKeyframes(c.keyframes, -left) ?? {},
             markers: shiftMarkers((c.markers ?? []).filter((m) => !inFirst(m)), -left),
+            link: c.link ? (rightLink.get(c.link) ?? rightLink.set(c.link, uid('l_')).get(c.link)!) : null,
           }
           newSel.push(b.id)
           return [a, b]
@@ -637,11 +667,13 @@ export const useEditor = create<EditorState>((set, get) => {
       const { selection, doc } = get()
       if (!selection.length) return
       const added: Clip[] = []
+      const linkMap = new Map<string, string>()
       for (const c of doc.clips.filter((c) => selection.includes(c.id))) {
         const all = [...doc.clips, ...added]
         const start = findFreeStart(all, c.track_id, clipEnd(c), c.duration)
         const copy = structuredClone(c)
-        added.push({ ...copy, id: uid('c_'), start, markers: (copy.markers ?? []).map((m) => ({ ...m, id: uid('m_') })) })
+        const link = copy.link ? (linkMap.get(copy.link) ?? linkMap.set(copy.link, uid('l_')).get(copy.link)!) : null
+        added.push({ ...copy, id: uid('c_'), start, link, markers: (copy.markers ?? []).map((m) => ({ ...m, id: uid('m_') })) })
       }
       setClips((clips) => [...clips, ...added])
       set({ selection: added.map((c) => c.id) })
@@ -696,6 +728,15 @@ export const useEditor = create<EditorState>((set, get) => {
     },
   }
 })
+
+/** ``ids`` plus every clip linked to one of them. */
+export function withLinked(ids: string[], clips: Clip[]): string[] {
+  const links = new Set(clips.filter((c) => ids.includes(c.id) && c.link).map((c) => c.link))
+  if (!links.size) return ids
+  const out = new Set(ids)
+  for (const c of clips) if (c.link && links.has(c.link)) out.add(c.id)
+  return [...out]
+}
 
 /** Pairs of touching visual clips on the same track (where transitions can go). */
 export function cuts(doc: Doc): { a: Clip; b: Clip; time: number }[] {

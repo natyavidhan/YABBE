@@ -224,6 +224,8 @@ class Clip(_Model):
     keyframes: dict[AnimProp, list[Keyframe]] = Field(default_factory=dict)
     markers: list[Marker] = Field(default_factory=list, max_length=500)
     transition: Optional[Transition] = None
+    # Clips sharing a link id are selected / moved / deleted together (editor only).
+    link: Optional[str] = Field(None, max_length=40)
 
     @field_validator("keyframes")
     @classmethod

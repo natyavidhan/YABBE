@@ -171,6 +171,8 @@ export interface Clip {
   keyframes: Partial<Record<AnimProp, Keyframe[]>>
   markers: Marker[]
   transition?: Transition | null
+  /** Clips sharing a link id are selected / moved / deleted together. */
+  link?: string | null
 }
 
 export interface Project {

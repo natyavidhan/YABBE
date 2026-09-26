@@ -513,7 +513,7 @@ function TransformOverlay({ width }: { width: number }) {
   }
 
   return (
-    <div ref={ref} className="absolute inset-0 touch-none overflow-hidden" onPointerDown={onStageDown}>
+    <div ref={ref} className="absolute inset-0 touch-none overflow-hidden select-none" onPointerDown={onStageDown}>
       {guides.v && <div className="pointer-events-none absolute top-0 bottom-0 left-1/2 w-px bg-accent-2/80" />}
       {guides.h && <div className="pointer-events-none absolute top-1/2 right-0 left-0 h-px bg-accent-2/80" />}
       <MotionPath width={width} />
