@@ -19,6 +19,22 @@ export interface GraphKey {
 }
 
 const graphHiddenKey = (projectId: string) => `yabbe.graphHidden.${projectId}`
+const collapsedKey = (projectId: string) => `yabbe.collapsed.${projectId}`
+
+function loadMap(key: string): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(key) ?? '{}')
+  } catch {
+    return {}
+  }
+}
+function saveMap(key: string, value: Record<string, boolean>) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch {
+    /* ignore */
+  }
+}
 
 function loadGraphHidden(projectId: string): Record<string, boolean> {
   try {
@@ -77,6 +93,10 @@ interface EditorState {
   /** `${clipId}:${prop}` -> hidden from the graph editor. */
   graphHidden: Record<string, boolean>
   graphSel: GraphKey[]
+  /** Collapsed tracks (view state, remembered per project in this browser). */
+  collapsed: Record<string, boolean>
+  toggleCollapsed: (trackId: string) => void
+  setAllCollapsed: (collapsed: boolean) => void
   /** Selected transition, identified by the clip it leaves (clip A). */
   transSel: string | null
   selectTransition: (clipId: string | null) => void
@@ -318,6 +338,23 @@ export const useEditor = create<EditorState>((set, get) => {
     graphHidden: {},
     graphSel: [],
     transSel: null,
+    collapsed: {},
+
+    toggleCollapsed: (trackId) => {
+      const next = { ...get().collapsed }
+      if (next[trackId]) delete next[trackId]
+      else next[trackId] = true
+      set({ collapsed: next })
+      const pid = get().projectId
+      if (pid) saveMap(collapsedKey(pid), next)
+    },
+    setAllCollapsed: (on) => {
+      const next: Record<string, boolean> = {}
+      if (on) for (const t of get().doc.tracks) next[t.id] = true
+      set({ collapsed: next })
+      const pid = get().projectId
+      if (pid) saveMap(collapsedKey(pid), next)
+    },
 
     selectTransition: (clipId) => set(clipId ? { transSel: clipId, selection: [], graphSel: [] } : { transSel: null }),
     setTransition: (clipId, t) =>
@@ -365,6 +402,7 @@ export const useEditor = create<EditorState>((set, get) => {
         playing: false,
         uploads: [],
         graphHidden: loadGraphHidden(p.id),
+        collapsed: loadMap(collapsedKey(p.id)),
         graphSel: [],
       }),
     setAssets: (assets) => set({ assets }),

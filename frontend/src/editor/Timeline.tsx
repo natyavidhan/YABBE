@@ -1,5 +1,8 @@
 import {
   ChevronDown,
+  ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   ChevronUp,
   Copy,
   ChartSpline,
@@ -40,6 +43,10 @@ const HEADER_W_COMPACT = 104
 const LONG_PRESS_MS = 450
 const RULER_H = 28
 const TRACK_H = { video: 64, audio: 52 } as const
+const COLLAPSED_H = 24
+
+/** Row height of a track (collapsed tracks are a thin strip). */
+const rowHeight = (t: Track, collapsed: Record<string, boolean>) => (collapsed[t.id] ? COLLAPSED_H : TRACK_H[t.kind])
 const SNAP_PX = 8
 
 type DragState =
@@ -62,6 +69,7 @@ export function Timeline({ projectId }: { projectId: string }) {
   const assets = useEditor((s) => s.assets)
   const selection = useEditor((s) => s.selection)
   const transSel = useEditor((s) => s.transSel)
+  const collapsed = useEditor((s) => s.collapsed)
   const duration = useEditor((s) => docDuration(s.doc))
   const doc = useEditor((s) => s.doc)
   const cutList = useMemo(() => cuts(doc), [doc])
@@ -178,7 +186,7 @@ export function Timeline({ projectId }: { projectId: string }) {
       if (!lanes) return null
       let y = clientY - lanes.getBoundingClientRect().top
       for (const t of useEditor.getState().doc.tracks) {
-        const h = TRACK_H[t.kind]
+        const h = rowHeight(t, useEditor.getState().collapsed)
         if (y >= 0 && y < h) return t
         y -= h
       }
@@ -434,7 +442,7 @@ export function Timeline({ projectId }: { projectId: string }) {
       const hit = new Set<string>()
       let y = RULER_H
       for (const t of st.doc.tracks) {
-        const h = TRACK_H[t.kind]
+        const h = rowHeight(t, st.collapsed)
         if (box.y1 >= y && box.y0 <= y + h) hit.add(t.id)
         y += h
       }
@@ -513,8 +521,15 @@ export function Timeline({ projectId }: { projectId: string }) {
           {/* Tracks */}
           <div ref={lanesRef}>
             {tracks.map((track, i) => (
-              <div key={track.id} className="flex" style={{ height: TRACK_H[track.kind] }}>
-                <TrackHeader track={track} index={i} count={tracks.length} width={headerW} compact={compact} />
+              <div key={track.id} className="flex" style={{ height: rowHeight(track, collapsed) }}>
+                <TrackHeader
+                  track={track}
+                  index={i}
+                  count={tracks.length}
+                  width={headerW}
+                  compact={compact}
+                  collapsed={!!collapsed[track.id]}
+                />
                 <div
                   className={`group/lane relative flex-1 border-b border-line ${track.kind === 'audio' ? 'bg-[#13161b]' : 'bg-bg'} ${
                     track.hidden || track.muted ? 'opacity-50' : ''
@@ -538,7 +553,7 @@ export function Timeline({ projectId }: { projectId: string }) {
                         clip={c}
                         asset={c.asset_id ? assetMap.get(c.asset_id) : undefined}
                         zoom={zoom}
-                        height={TRACK_H[track.kind]}
+                        height={rowHeight(track, collapsed)}
                         selected={selection.includes(c.id)}
                         locked={track.locked}
                         onDown={onClipDown}
@@ -554,7 +569,7 @@ export function Timeline({ projectId }: { projectId: string }) {
                         key={`${c.a.id}-${c.b.id}`}
                         cut={c}
                         zoom={zoom}
-                        height={TRACK_H[track.kind]}
+                        height={rowHeight(track, collapsed)}
                         selected={transSel === c.a.id}
                         near={selection.includes(c.a.id) || selection.includes(c.b.id)}
                         locked={track.locked}
@@ -659,14 +674,16 @@ function TrackHeader({
   count,
   width,
   compact,
+  collapsed,
 }: {
   track: Track
   index: number
   count: number
   width: number
   compact: boolean
+  collapsed: boolean
 }) {
-  const { updateTrack, removeTrack, moveTrack } = useEditor.getState()
+  const { updateTrack, removeTrack, moveTrack, toggleCollapsed } = useEditor.getState()
   const [editing, setEditing] = useState(false)
   const [menu, setMenu] = useState(false)
   const hasClips = useEditor((s) => s.doc.clips.some((c) => c.track_id === track.id))
@@ -675,12 +692,22 @@ function TrackHeader({
   const canDown = index < count - 1 && neighbours[index + 1]?.kind === track.kind
   return (
     <div
-      className={`group sticky left-0 z-[18] flex shrink-0 flex-col justify-center gap-1 border-r border-b border-line bg-panel ${
-        compact ? 'px-1.5' : 'px-2.5'
-      }`}
+      className={`group sticky left-0 z-[18] flex shrink-0 border-r border-b border-line bg-panel ${
+        collapsed ? 'flex-row items-center gap-1' : 'flex-col justify-center gap-1'
+      } ${compact ? 'px-1' : 'pr-2.5 pl-1'}`}
       style={{ width }}
     >
-      <div className="flex items-center gap-1.5">
+      <div className={`flex min-w-0 items-center gap-1 ${collapsed ? 'flex-1' : ''}`}>
+        <button
+          type="button"
+          onClick={() => toggleCollapsed(track.id)}
+          className="flex h-5 w-4 shrink-0 items-center justify-center rounded text-faint hover:text-fg"
+          aria-label={collapsed ? `Expand ${track.name}` : `Collapse ${track.name}`}
+          aria-expanded={!collapsed}
+          title={collapsed ? 'Expand track' : 'Collapse track'}
+        >
+          {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+        </button>
         <span className={`h-2 w-2 shrink-0 rounded-full ${track.kind === 'audio' ? 'bg-clip-audio' : 'bg-clip-video'}`} />
         {editing ? (
           <input
@@ -707,7 +734,7 @@ function TrackHeader({
           </span>
         )}
       </div>
-      <div className="flex items-center gap-0.5">
+      <div className={`items-center gap-0.5 ${collapsed ? (compact ? 'hidden' : 'flex shrink-0') : 'flex pl-5'} ${collapsed ? '[&_button]:h-5! [&_button]:w-5!' : ''}`}>
         {track.kind === 'video' ? (
           <IconButton label={track.hidden ? 'Show track' : 'Hide track'} active={track.hidden} onClick={() => updateTrack(track.id, { hidden: !track.hidden })} className="h-6! w-6!">
             {track.hidden ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -719,8 +746,8 @@ function TrackHeader({
         <IconButton label={track.locked ? 'Unlock track' : 'Lock track'} active={track.locked} onClick={() => updateTrack(track.id, { locked: !track.locked })} className="h-6! w-6!">
           {track.locked ? <Lock size={13} /> : <Unlock size={13} />}
         </IconButton>
-        <div className="flex-1" />
-        <div className={`${compact ? 'hidden' : 'flex'} opacity-0 transition-opacity group-hover:opacity-100`}>
+        {!collapsed && <div className="flex-1" />}
+        <div className={`${compact || collapsed ? 'hidden' : 'flex'} opacity-0 transition-opacity group-hover:opacity-100`}>
           <IconButton label="Move track up" disabled={!canUp} onClick={() => moveTrack(track.id, -1)} className="h-6! w-5!">
             <ChevronUp size={13} />
           </IconButton>
@@ -780,6 +807,7 @@ function Toolbar({ compact }: { compact: boolean }) {
   const canLink = useEditor((s) => s.selection.length > 1)
   const canUnlink = useEditor((s) => s.doc.clips.some((c) => c.link && s.selection.includes(c.id)))
   const graphOpen = useEditor((s) => s.graphOpen)
+  const anyExpanded = useEditor((s) => s.doc.tracks.some((t) => !s.collapsed[t.id]))
   const s = useEditor.getState()
   return (
     <div className="flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line px-2">
@@ -828,6 +856,12 @@ function Toolbar({ compact }: { compact: boolean }) {
         <Plus size={13} /> {compact ? 'Audio' : 'Audio track'}
       </button>
       <div className="flex-1" />
+      <IconButton
+        label={anyExpanded ? 'Collapse all tracks' : 'Expand all tracks'}
+        onClick={() => s.setAllCollapsed(anyExpanded)}
+      >
+        {anyExpanded ? <ChevronsDownUp size={15} /> : <ChevronsUpDown size={15} />}
+      </IconButton>
       <IconButton label="Graph editor (G)" active={graphOpen} onClick={() => s.setGraphOpen(!graphOpen)}>
         <ChartSpline size={15} />
       </IconButton>
@@ -895,8 +929,9 @@ const TimelineClip = memo(function TimelineClip({
     clip.type === 'text' ? (clip.text?.content.split('\n')[0] ?? 'Text') : (asset?.original_name ?? 'Missing media')
   const ready = asset?.status === 'ready'
   const bodyH = height - 4 - 16
-  const showFilm = ready && (clip.type === 'video' || clip.type === 'image') && asset!.thumb_count > 0
-  const showWave = ready && asset!.has_audio && (clip.type === 'audio' || clip.type === 'video')
+  const roomy = bodyH >= 10 // collapsed tracks show a slim labelled bar only
+  const showFilm = roomy && ready && (clip.type === 'video' || clip.type === 'image') && asset!.thumb_count > 0
+  const showWave = roomy && ready && asset!.has_audio && (clip.type === 'audio' || clip.type === 'video')
 
   return (
     <div
