@@ -1,0 +1,12 @@
+services:
+  yabbe:
+    build: .
+    image: yabbe:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+    environment:
+      YABBE_JOB_WORKERS: "2"
+      YABBE_PREVIEW_WORKERS: "2"
+    restart: unless-stopped
