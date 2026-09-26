@@ -118,6 +118,8 @@ class Transition(_Model):
 
     kind: str = Field("mix", max_length=40)
     duration: float = Field(0.5, ge=0.04, le=5)
+    # Crossfade the two clips' sound over the transition (equal power).
+    audio: bool = True
 
 
 class Marker(_Model):

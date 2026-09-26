@@ -906,11 +906,15 @@ function CutMarker({
 }) {
   const s = useEditor.getState()
   const t = cut.a.transition
+  const [hover, setHover] = useState<DOMRect | null>(null)
   if (t) {
     const d = transitionLength(cut.a, cut.b)
     const w = Math.max(compact ? 24 : 18, d * zoom)
     return (
+      <>
       <button
+        onPointerEnter={(e) => e.pointerType === 'mouse' && setHover(e.currentTarget.getBoundingClientRect())}
+        onPointerLeave={() => setHover(null)}
         type="button"
         title={`${name} · ${d.toFixed(2)} s — click to edit`}
         aria-label={`Transition ${name}`}
@@ -931,6 +935,8 @@ function CutMarker({
       >
         <ArrowRightLeft size={12} />
       </button>
+      {hover && <TransitionHoverCard kind={t.kind} name={name} duration={d} anchor={hover} />}
+      </>
     )
   }
   if (locked) return null
@@ -953,6 +959,24 @@ function CutMarker({
     >
       <Plus size={compact ? 14 : 11} />
     </button>
+  )
+}
+
+/** Floating animated preview above a transition badge (rendered in a portal-free fixed layer). */
+function TransitionHoverCard({ kind, name, duration, anchor }: { kind: string; name: string; duration: number; anchor: DOMRect }) {
+  const W = 240
+  const left = Math.max(8, Math.min(window.innerWidth - W - 8, anchor.left + anchor.width / 2 - W / 2))
+  return (
+    <div
+      className="toast-in pointer-events-none fixed z-50 overflow-hidden rounded-lg border border-line-strong bg-raised shadow-2xl shadow-black/60"
+      style={{ left, bottom: window.innerHeight - anchor.top + 8, width: W }}
+    >
+      <img src={api.transitionPreviewUrl(kind)} alt="" className="aspect-video w-full bg-bg object-cover" />
+      <div className="flex items-center justify-between px-2 py-1 text-[11px]">
+        <span className="font-medium">{name}</span>
+        <span className="text-muted">{duration.toFixed(2)} s</span>
+      </div>
+    </div>
   )
 }
 

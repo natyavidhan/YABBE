@@ -1,5 +1,6 @@
 import { ArrowRightLeft, CopyCheck, Trash2 } from 'lucide-react'
 import { useState } from 'react'
+import { useMediaQuery } from '../lib/useMedia'
 import { api } from '../api/client'
 import { toast } from '../components/toast'
 import { Button, NumberInput, Spinner } from '../components/ui'
@@ -14,6 +15,8 @@ export function TransitionPanel({ clipId }: { clipId: string }) {
   const cut = cuts(doc).find((c) => c.a.id === clipId)
   const t = cut?.a.transition
   const [category, setCategory] = useState<string | null>(null)
+  const [hovered, setHovered] = useState<string | null>(null)
+  const coarse = useMediaQuery('(pointer: coarse)')
   const { setTransition, selectTransition, beginGesture, endGesture } = useEditor.getState()
   const locked = doc.tracks.find((tr) => tr.id === cut?.a.track_id)?.locked ?? false
 
@@ -89,6 +92,16 @@ export function TransitionPanel({ clipId }: { clipId: string }) {
             />
           </div>
         </div>
+        <label className="flex items-center gap-2 text-xs text-muted" title="Blend the two clips' sound over the transition">
+          <input
+            type="checkbox"
+            checked={t.audio !== false}
+            disabled={locked}
+            onChange={(e) => setTransition(cut.a.id, { ...t, audio: e.target.checked })}
+            className="accent-accent"
+          />
+          Crossfade audio
+        </label>
         {t.duration > maxD + 1e-6 && (
           <p className="text-[11px] text-warn">Limited to {maxD.toFixed(2)} s by the shorter clip.</p>
         )}
@@ -135,19 +148,34 @@ export function TransitionPanel({ clipId }: { clipId: string }) {
                 key={x.id}
                 type="button"
                 disabled={locked}
+                onPointerEnter={() => setHovered(x.id)}
+                onPointerLeave={() => setHovered((h) => (h === x.id ? null : h))}
+                onFocus={() => setHovered(x.id)}
+                onBlur={() => setHovered((h) => (h === x.id ? null : h))}
                 onClick={() => setTransition(cut.a.id, { ...t, kind: x.id })}
                 className={`group overflow-hidden rounded-lg border text-left transition-colors ${
                   x.id === t.kind ? 'border-accent ring-1 ring-accent' : 'border-line hover:border-line-strong'
                 }`}
                 title={`Use “${x.name}”`}
               >
-                <img
-                  src={api.transitionPreviewUrl(x.id)}
-                  alt=""
-                  loading="lazy"
-                  className="aspect-video w-full bg-bg object-cover"
-                  draggable={false}
-                />
+                <div className="relative aspect-video w-full bg-bg">
+                  {/* Still mid-transition; plays the animated preview on hover (or when chosen). */}
+                  <img
+                    src={api.transitionPosterUrl(x.id)}
+                    alt=""
+                    loading="lazy"
+                    className="absolute inset-0 h-full w-full object-cover"
+                    draggable={false}
+                  />
+                  {(hovered === x.id || (x.id === t.kind && (coarse || hovered === null))) && (
+                    <img
+                      src={api.transitionPreviewUrl(x.id)}
+                      alt=""
+                      className="absolute inset-0 h-full w-full object-cover"
+                      draggable={false}
+                    />
+                  )}
+                </div>
                 <div className="truncate px-2 py-1 text-[11px]">{x.name}</div>
               </button>
             ))}

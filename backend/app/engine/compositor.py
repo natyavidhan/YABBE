@@ -201,6 +201,7 @@ class _Plan:
     a: float
     b: float
     kind: str
+    audio: bool = True
 
 
 def plan_transitions(project: Project) -> list[_Plan]:
@@ -219,7 +220,7 @@ def plan_transitions(project: Project) -> list[_Plan]:
             d = min(A.transition.duration, A.duration, B.duration)
             if d < 1 / fps:
                 continue
-            plans.append(_Plan(tid, A, B, A.end - d / 2, A.end + d / 2, A.transition.kind))
+            plans.append(_Plan(tid, A, B, A.end - d / 2, A.end + d / 2, A.transition.kind, A.transition.audio))
     return plans
 
 
@@ -349,7 +350,11 @@ def _video_layer(
     return label, f"overlay@ov{idx}", ox, oy
 
 
-def _audio_chain(g: Graph, clip: Clip, vis: _Visible, idx: int) -> str:
+def _audio_chain(
+    g: Graph, clip: Clip, vis: _Visible, idx: int, t0: float = 0.0,
+    xfades: tuple[tuple[str, float, float], ...] = (),
+) -> str:
+    """``xfades``: ("in" | "out", a, b) equal-power crossfades over timeline [a, b]."""
     label = f"a{idx}"
     chain = ["asetpts=PTS-STARTPTS", *_atempo_chain(clip.speed)]
     chain += [
@@ -365,6 +370,10 @@ def _audio_chain(g: Graph, clip: Clip, vis: _Visible, idx: int) -> str:
         expr += f"*max(0,min(1,(t+{o})/{_num(clip.fade_in)}))"
     if clip.fade_out > EPS:
         expr += f"*max(0,min(1,({cd}-t-{o})/{_num(clip.fade_out)}))"
+    for kind, a, b in xfades:
+        # timeline time of this sample = window start + clip offset in window + t
+        prog = f"clip((t+{_num(t0 + vis.offset - a)})/{_num(max(EPS, b - a))},0,1)"
+        expr += f"*{'sin' if kind == 'in' else 'cos'}(PI/2*{prog})"
     if expr != vol:
         chain.append(f"volume='{expr}':eval=frame")
     elif not vol_kf:
@@ -402,9 +411,14 @@ def build(project: Project, win: Window) -> Graph:
     plans = [p for p in plan_transitions(project) if p.track_id in tracks]
     lo: dict[str, float] = {}
     hi: dict[str, float] = {}
+    audio_out: dict[str, tuple[float, float]] = {}
+    audio_in: dict[str, tuple[float, float]] = {}
     for p in plans:
         hi[p.A.id] = p.a
         lo[p.B.id] = p.b
+        if p.audio:
+            audio_out[p.A.id] = (p.a, p.b)
+            audio_in[p.B.id] = (p.a, p.b)
 
     # (rank, time, overlay spec) — composited bottom track first, then by time.
     items: list[tuple[int, float, str, str, str, str, float, float]] = []
@@ -431,19 +445,32 @@ def build(project: Project, win: Window) -> Graph:
                         items.append((-track_rank[clip.track_id], clip.start, label, name, ox, oy,
                                       vis.offset, vis.offset + vis.length))
 
-        # ---- sound (cuts at the cut; transitions are picture-only) -----------------------
+        # ---- sound (crossfades through transitions that have audio on) -------------------
         vol_frames = clip.animated("volume")
         audible = max(kf.v for kf in vol_frames) > 0 if vol_frames else clip.volume > 0
         if (
             win.audio and not track.muted and not clip.muted and audible
             and clip.type in ("video", "audio") and asset is not None and asset.has_audio
         ):
-            avis = _visible(clip, win)
-            path = _path_for(project, asset, win) if avis else None
-            if avis and path is not None:
+            fade_in = audio_in.get(clip.id)
+            fade_out = audio_out.get(clip.id)
+            s = max(fade_in[0] if fade_in else clip.start, win.t0)
+            e = min(fade_out[1] if fade_out else clip.end, win.t1)
+            into = s - clip.start
+            src = clip.in_point + into * clip.speed
+            if src < 0:  # no footage before the source start: begin later
+                s -= src / clip.speed
+                into = s - clip.start
+                src = 0.0
+            if asset.duration > 0:  # ...and none past its end
+                e = min(e, s + (asset.duration - src) / clip.speed)
+            path = _path_for(project, asset, win)
+            if e - s > EPS and path is not None:
+                avis = _Visible(clip, s - win.t0, into, e - s)
                 pad = 2 / fps * clip.speed
                 idx = g.add_input("-ss", _num(avis.src_in), "-t", _num(avis.src_len + pad), "-i", str(path))
-                audio_labels.append(_audio_chain(g, clip, avis, idx))
+                xf = tuple(x for x in (("in", *fade_in) if fade_in else None, ("out", *fade_out) if fade_out else None) if x)
+                audio_labels.append(_audio_chain(g, clip, avis, idx, win.t0, xf))
 
     # ---- transitions ----------------------------------------------------------------------
     if win.video:

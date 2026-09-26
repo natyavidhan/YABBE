@@ -134,6 +134,8 @@ export interface Marker {
 export interface Transition {
   kind: string
   duration: number
+  /** Crossfade the two clips' sound over the transition (default on). */
+  audio?: boolean
 }
 
 export interface TransitionInfo {

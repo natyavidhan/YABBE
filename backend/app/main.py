@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
@@ -20,6 +21,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     config.ensure_dirs()
+    # Render any missing transition previews in the background, so hovering a
+    # transition shows its preview instantly.
+    threading.Thread(target=transitions.prerender_all, name="yabbe-previews", daemon=True).start()
     yield
     jobs.shutdown()
 

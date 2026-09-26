@@ -125,5 +125,5 @@ Ops
       click to seek, double-click to add keys, toggle
 
 ## Later
-Audio crossfades for transitions, keyframable crop/colour, effects/filters (colour, blur), audio ducking, captions
+Keyframable crop/colour, effects/filters (colour, blur), audio ducking, captions
 import (SRT), render queue across projects, WebSocket push instead of polling.

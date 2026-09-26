@@ -84,7 +84,11 @@ videos can be uploaded.
   wind). Hover a cut between two touching clips and press **+**; pick from
   animated previews, set the duration, apply to all cuts. Transitions are
   centred on the cut and use footage beyond the clip edges when it exists
-  (otherwise the edge frame is held), so the timeline doesn't shift.
+  (otherwise the edge frame is held), so the timeline doesn't shift. The two
+  clips' sound crossfades over the transition (equal power; can be switched
+  off per transition). Previews use two sample scenes, are pre-rendered in the
+  background when the server starts, and play when you hover a transition in
+  the panel or on the timeline.
 * **Speed** — 0.25×–4× with a hold-to-repeat stepper and presets; the clip
   resizes on the timeline as you change it, or type a length in **Fit to**
   and the speed is chosen so the same footage plays in exactly that time.

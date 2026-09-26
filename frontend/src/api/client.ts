@@ -125,6 +125,7 @@ export const api = {
   // transitions
   transitions: () => request<TransitionCatalog>('GET', '/api/transitions'),
   transitionPreviewUrl: (kind: string) => `/api/transitions/${encodeURIComponent(kind)}/preview.webp`,
+  transitionPosterUrl: (kind: string) => `/api/transitions/${encodeURIComponent(kind)}/poster.jpg`,
 
   // text
   fonts: () => request<string[]>('GET', '/api/fonts'),

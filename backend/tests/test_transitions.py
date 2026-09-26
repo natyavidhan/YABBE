@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+from pathlib import Path
 import subprocess
 
 import pytest
@@ -50,6 +51,9 @@ def test_preview_webp(client):
     r = client.get("/api/transitions/spin/preview.webp")
     assert r.status_code == 200 and r.content[:4] == b"RIFF" and b"WEBP" in r.content[:16]
     assert client.get("/api/transitions/nope/preview.webp").status_code == 404
+    r = client.get("/api/transitions/spin/poster.jpg")
+    assert r.status_code == 200 and r.content[:3] == b"\xff\xd8\xff"
+    assert Image.open(io.BytesIO(r.content)).size == (320, 180)
 
 
 def test_mix_blends_around_the_cut(client, two_colours):
@@ -107,3 +111,56 @@ def test_export_with_transition(client, two_colours, tmp_path, kind):
     s = client.post(f"/api/projects/{pid}/preview", json={"height": 360}).json()
     assert client.get(f"/api/preview/{s['key']}/seg_0.ts").status_code == 200
     assert client.get(f"/api/preview/{s['key']}/seg_1.ts").status_code == 200
+
+
+def test_audio_crossfade(client, tmp_path):
+    """Two tones across a transition: both audible (crossfaded) inside the
+    window; with audio off, a hard cut at the cut."""
+    low, high = tmp_path / "low.mp4", tmp_path / "high.mp4"
+    for f, hz in ((low, 300), (high, 2000)):
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=gray:s=320x180:r=25:d=6",
+                        "-f", "lavfi", "-i", f"sine=f={hz}:d=6", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                        "-c:a", "aac", str(f)], check=True)
+    pid = client.post("/api/projects", json={"name": "xfade", "width": 320, "height": 180, "fps": 25}).json()["id"]
+    lo, hi = _upload(client, pid, low), _upload(client, pid, high)
+    project = _wait_ready(client, pid)
+    track = project["tracks"][1]["id"]
+
+    def export(audio: bool) -> Path:
+        client.put(f"/api/projects/{pid}", json={"clips": [
+            {"track_id": track, "type": "video", "asset_id": lo["id"], "start": 0, "duration": 2, "in_point": 1,
+             "transition": {"kind": "mix", "duration": 1.0, "audio": audio}},
+            {"track_id": track, "type": "video", "asset_id": hi["id"], "start": 2, "duration": 2, "in_point": 1},
+        ]})
+        r = client.post(f"/api/projects/{pid}/exports", json={"quality": "low"})
+        assert _wait_job(client, r.json()["job"]["id"])["status"] == "done"
+        out = tmp_path / f"x{audio}.wav"
+        mp4 = tmp_path / f"x{audio}.mp4"
+        mp4.write_bytes(client.get(f"/api/projects/{pid}/exports/{r.json()['export']['id']}/download").content)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(mp4), "-ac", "1", "-ar", "8000", str(out)], check=True)
+        return out
+
+    def band_levels(wav: Path, t: float):
+        """Energy of the 300 Hz and 2 kHz tones in a 0.1 s slice at t."""
+        import math, wave, struct
+        w = wave.open(str(wav))
+        rate = w.getframerate()
+        w.setpos(int(t * rate))
+        n = int(0.1 * rate)
+        xs = struct.unpack(f"<{n}h", w.readframes(n))
+        def mag(f):
+            re = sum(x * math.cos(2 * math.pi * f * i / rate) for i, x in enumerate(xs))
+            im = sum(x * math.sin(2 * math.pi * f * i / rate) for i, x in enumerate(xs))
+            return math.hypot(re, im) / n
+        return mag(300), mag(2000)
+
+    from pathlib import Path  # noqa: F811
+    on = export(True)
+    lo_before, hi_before = band_levels(on, 1.2)
+    lo_mid, hi_mid = band_levels(on, 1.95)
+    lo_after, hi_after = band_levels(on, 2.8)
+    assert lo_before > 10 * max(hi_before, 1) and hi_after > 10 * max(lo_after, 1)
+    assert lo_mid > 0.3 * lo_before and hi_mid > 0.3 * hi_after  # both audible mid-crossfade
+    off = export(False)
+    lo_mid2, hi_mid2 = band_levels(off, 1.8)
+    assert hi_mid2 < 0.1 * max(lo_mid2, 1)  # hard cut: B not heard before the cut
