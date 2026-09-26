@@ -412,8 +412,9 @@ export function Timeline({ projectId }: { projectId: string }) {
           {/* Ruler */}
           <div className="sticky top-0 z-20 flex" style={{ height: RULER_H }}>
             <div className="sticky left-0 z-30 shrink-0 border-r border-b border-line bg-panel" style={{ width: headerW }} />
-            <div className="relative flex-1 cursor-text touch-none border-b border-line bg-panel-2" onPointerDown={scrub}>
+            <div className="relative flex-1 cursor-pointer touch-none border-b border-line bg-panel-2" onPointerDown={scrub}>
               <Ruler zoom={zoom} from={visible.from} to={visible.to} />
+              <PlayheadHead />
             </div>
           </div>
 
@@ -466,20 +467,44 @@ export function Timeline({ projectId }: { projectId: string }) {
               style={{ left: headerW + snapLine * zoom }}
             />
           )}
-          <Playhead headerW={headerW} />
+          <PlayheadLine headerW={headerW} scrollLeft={view.left} />
         </div>
       </div>
     </div>
   )
 }
 
-function Playhead({ headerW }: { headerW: number }) {
+/**
+ * Playhead line across the tracks: 2px, snapped to whole pixels (a 1px line
+ * offset by half a pixel blurs into near-invisibility) with a dark outline so
+ * it stays visible over bright filmstrips. Layered above clips (z-5) but below
+ * the sticky track headers (z-18) and ruler (z-20).
+ */
+function PlayheadLine({ headerW, scrollLeft }: { headerW: number; scrollLeft: number }) {
   const playhead = useEditor((s) => s.playhead)
   const zoom = useEditor((s) => s.zoom)
+  // Scrolled out of view to the left: don't let it peek out beside the headers.
+  if (playhead * zoom < scrollLeft - 1) return null
   return (
-    <div className="pointer-events-none absolute top-0 bottom-0 z-20" style={{ left: headerW + playhead * zoom }}>
-      <div className="sticky top-0 -ml-[6px] h-0 w-0 border-x-[6px] border-t-[9px] border-x-transparent border-t-danger" style={{ top: RULER_H - 9 }} />
-      <div className="absolute top-0 bottom-0 w-px -translate-x-1/2 bg-danger" />
+    <div
+      className="pointer-events-none absolute top-0 bottom-0 z-[15] w-[2px] bg-danger shadow-[0_0_0_1px_rgba(0,0,0,0.45)]"
+      style={{ left: Math.round(headerW + playhead * zoom) - 1 }}
+    />
+  )
+}
+
+/** Draggable playhead handle in the ruler (drags scrub via the ruler's handler). */
+function PlayheadHead() {
+  const playhead = useEditor((s) => s.playhead)
+  const zoom = useEditor((s) => s.zoom)
+  const x = Math.round(playhead * zoom)
+  return (
+    <div className="absolute top-0 bottom-0 z-10 cursor-ew-resize" style={{ left: x - 7, width: 14 }} title="Drag to scrub">
+      <div className="absolute top-0 bottom-0 left-[6px] w-[2px] bg-danger" />
+      <div
+        className="absolute bottom-0 left-0 h-[14px] w-[14px] bg-danger drop-shadow-[0_1px_1px_rgba(0,0,0,0.6)]"
+        style={{ clipPath: 'polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%)' }}
+      />
     </div>
   )
 }
@@ -541,7 +566,7 @@ function TrackHeader({
   const canDown = index < count - 1 && neighbours[index + 1]?.kind === track.kind
   return (
     <div
-      className={`group sticky left-0 z-10 flex shrink-0 flex-col justify-center gap-1 border-r border-b border-line bg-panel ${
+      className={`group sticky left-0 z-[18] flex shrink-0 flex-col justify-center gap-1 border-r border-b border-line bg-panel ${
         compact ? 'px-1.5' : 'px-2.5'
       }`}
       style={{ width }}
