@@ -14,14 +14,16 @@ Geometry (project pixels, later multiplied by ``scale``):
 
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from ..models import Asset, Clip, Project
-from . import media, text
+from .. import config
+from ..models import Asset, Clip, Keyframe, Project
+from . import keyframes, media, text
 
 EPS = 1e-6
 AUDIO_RATE = 48000
@@ -101,7 +103,8 @@ def source_size(project: Project, clip: Clip) -> Optional[tuple[int, int]]:
     return asset.width, asset.height
 
 
-def layer_geometry(project: Project, clip: Clip) -> Optional[LayerGeometry]:
+def base_size(project: Project, clip: Clip) -> Optional[tuple[float, float]]:
+    """Layer size at scale 1: cropped source, contain-fitted (text: natural size)."""
     size = source_size(project, clip)
     if size is None:
         return None
@@ -109,8 +112,23 @@ def layer_geometry(project: Project, clip: Clip) -> Optional[LayerGeometry]:
     cw, ch = sw * clip.crop.width_fraction(), sh * clip.crop.height_fraction()
     W, H = project.settings.width, project.settings.height
     fit = 1.0 if clip.type == "text" else min(W / cw, H / ch)
-    s = clip.transform.scale
-    return LayerGeometry(cw * fit * s, ch * fit * s, W / 2 + clip.transform.x, H / 2 + clip.transform.y)
+    return cw * fit, ch * fit
+
+
+def layer_geometry(project: Project, clip: Clip, u: float = 0.0) -> Optional[LayerGeometry]:
+    """Geometry at clip-local time ``u`` (keyframes applied)."""
+    base = base_size(project, clip)
+    if base is None:
+        return None
+    val = lambda p: prop_value(clip, p, u)  # noqa: E731
+    s = val("scale")
+    W, H = project.settings.width, project.settings.height
+    return LayerGeometry(base[0] * s, base[1] * s, W / 2 + val("x"), H / 2 + val("y"))
+
+
+def prop_value(clip: Clip, prop: str, u: float) -> float:
+    frames = clip.animated(prop)
+    return keyframes.value_at(frames, u) if frames else clip.static_value(prop)
 
 
 def _atempo_chain(speed: float) -> list[str]:
@@ -149,6 +167,42 @@ def _visible(clip: Clip, win: Window) -> Optional[_Visible]:
     return _Visible(clip, a - win.t0, a - clip.start, b - a)
 
 
+def _prop(clip: Clip, prop: str, vis: "_Visible", single_frame: bool) -> tuple[float, Optional[list[Keyframe]]]:
+    """(constant, None) when the property doesn't change inside the visible
+    window, else (value at window start, keyframes) for a per-frame curve."""
+    frames = clip.animated(prop)
+    if not frames:
+        return clip.static_value(prop), None
+    u0, u1 = vis.into, vis.into + vis.length
+    if single_frame or len(frames) == 1 or u0 >= frames[-1].t or u1 <= frames[0].t:
+        return keyframes.value_at(frames, u0), None
+    return keyframes.value_at(frames, u0), frames
+
+
+def _signed(v: float) -> str:
+    return ("+" if v >= 0 else "-") + _num(abs(v))
+
+
+def _sendcmd_file(target: str, frames: list[Keyframe], vis: "_Visible", fps: float) -> Path:
+    """Per-frame opacity commands (colorchannelmixer has no expressions)."""
+    lines, last = [], None
+    n = max(1, math.ceil(vis.length * fps))
+    for i in range(n + 1):
+        v = round(keyframes.value_at(frames, vis.into + i / fps), 4)
+        if v != last:
+            lines.append(f"{vis.offset + i / fps:.6f} {target} aa {v};")
+            last = v
+    body = "\n".join(lines) + "\n"
+    d = config.DATA_DIR / "cache" / "cmd"
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / (hashlib.sha1(body.encode()).hexdigest()[:20] + ".txt")
+    if not path.is_file():
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(body)
+        tmp.replace(path)
+    return path
+
+
 def _path_for(project: Project, asset: Asset, win: Window) -> Optional[Path]:
     p = media.preview_source(project.id, asset) if win.use_proxies else media.source_path(project.id, asset)
     return p if p.is_file() else None
@@ -169,7 +223,8 @@ def build(project: Project, win: Window) -> Graph:
         key=lambda c: (-track_rank[c.track_id], c.start),
     )
 
-    video_labels: list[tuple[str, _Visible, LayerGeometry]] = []
+    video_labels: list[tuple[str, _Visible, str, str]] = []
+    single_frame = win.duration <= 1.5 / fps
     audio_labels: list[str] = []
 
     for clip in clips:
@@ -179,8 +234,10 @@ def build(project: Project, win: Window) -> Graph:
             continue
         asset = project.asset(clip.asset_id) if clip.asset_id else None
         wants_video = win.video and clip.is_visual and not track.hidden
+        vol_frames = clip.animated("volume")
+        audible = max(k.v for k in vol_frames) > 0 if vol_frames else clip.volume > 0
         wants_audio = (
-            win.audio and not track.muted and not clip.muted and clip.volume > 0
+            win.audio and not track.muted and not clip.muted and audible
             and clip.type in ("video", "audio") and asset is not None and asset.has_audio
         )
         if not (wants_video or wants_audio):
@@ -208,9 +265,18 @@ def build(project: Project, win: Window) -> Graph:
 
         # ---- video ----------------------------------------------------------------
         if wants_video and (asset is None or asset.has_video or asset.kind == "image" or clip.type == "text"):
-            geo = layer_geometry(project, clip)
-            if geo is not None:
+            base = base_size(project, clip)
+            if base is not None:
                 label = f"v{idx}"
+                # Clip-local time as a function of the filter's t (window-relative).
+                u = f"(t{_signed(vis.into - vis.offset)})"
+                scale0, scale_kf = _prop(clip, "scale", vis, single_frame)
+                rot0, rot_kf = _prop(clip, "rotation", vis, single_frame)
+                op0, op_kf = _prop(clip, "opacity", vis, single_frame)
+                x0, x_kf = _prop(clip, "x", vis, single_frame)
+                y0, y_kf = _prop(clip, "y", vis, single_frame)
+                bw, bh = base[0] * k, base[1] * k
+
                 chain = [f"setpts=(PTS-STARTPTS)/{_num(clip.speed)}+{_num(vis.offset)}/TB"]
                 c = clip.crop
                 if not c.is_identity():
@@ -218,22 +284,57 @@ def build(project: Project, win: Window) -> Graph:
                         f"crop=iw*{_num(c.width_fraction())}:ih*{_num(c.height_fraction())}"
                         f":iw*{_num(c.left)}:ih*{_num(c.top)}"
                     )
-                chain.append(f"scale={_even(geo.width * k)}:{_even(geo.height * k)}")
                 tr = clip.transform
+                if scale_kf:
+                    # Animated size, padded onto a fixed transparent canvas so the
+                    # overlay always receives frames of one size.
+                    s_expr = keyframes.expr(scale_kf, u)
+                    smax = keyframes.value_range(scale_kf)[1]
+                    lw, lh = _even(bw * smax), _even(bh * smax)
+                    chain.append(
+                        f"scale=w='max(2,trunc({_num(bw)}*{s_expr}/2)*2)'"
+                        f":h='max(2,trunc({_num(bh)}*{s_expr}/2)*2)':eval=frame"
+                    )
+                else:
+                    lw, lh = _even(bw * scale0), _even(bh * scale0)
+                    chain.append(f"scale={lw}:{lh}")
                 if tr.flip_h:
                     chain.append("hflip")
                 if tr.flip_v:
                     chain.append("vflip")
-                needs_alpha = clip.type in ("image", "text") or tr.opacity < 1 or abs(tr.rotation) > EPS
+                rotating = bool(rot_kf) or abs(rot0 % 360) > EPS
+                needs_alpha = (
+                    clip.type in ("image", "text") or op0 < 1 or bool(op_kf) or rotating or bool(scale_kf)
+                )
                 if needs_alpha:
                     chain.append("format=rgba")
-                if tr.opacity < 1:
-                    chain.append(f"colorchannelmixer=aa={_num(tr.opacity)}")
-                if abs(tr.rotation % 360) > EPS:
-                    rad = _num(math.radians(tr.rotation))
+                if scale_kf:
+                    chain.append(f"pad=w={lw}:h={lh}:x=(ow-iw)/2:y=(oh-ih)/2:color=black@0:eval=frame")
+                if op_kf:
+                    target = f"colorchannelmixer@op{idx}"
+                    cmd = _sendcmd_file(target, op_kf, vis, fps)
+                    chain.append(f"sendcmd=f='{cmd}'")
+                    chain.append(f"{target}=aa={_num(op0)}")
+                elif op0 < 1:
+                    chain.append(f"colorchannelmixer=aa={_num(op0)}")
+                if rot_kf:
+                    side = _even(math.hypot(lw, lh)) + 2
+                    a_expr = f"({keyframes.expr(rot_kf, u)})*PI/180"
+                    chain.append(f"rotate=a='{a_expr}':c=none:ow={side}:oh={side}")
+                elif rotating:
+                    rad = _num(math.radians(rot0))
                     chain.append(f"rotate={rad}:c=none:ow=rotw({rad}):oh=roth({rad})")
                 g.filters.append(f"[{idx}:v]{','.join(chain)}[{label}]")
-                video_labels.append((label, vis, geo))
+                W2, H2 = st.width / 2, st.height / 2
+                ox = (
+                    f"'({_num(W2)}+{keyframes.expr(x_kf, u)})*{_num(k)}-w/2'" if x_kf
+                    else f"{_num((W2 + x0) * k)}-w/2"
+                )
+                oy = (
+                    f"'({_num(H2)}+{keyframes.expr(y_kf, u)})*{_num(k)}-h/2'" if y_kf
+                    else f"{_num((H2 + y0) * k)}-h/2"
+                )
+                video_labels.append((label, vis, ox, oy))
 
         # ---- audio ----------------------------------------------------------------
         if wants_audio:
@@ -244,14 +345,16 @@ def build(project: Project, win: Window) -> Graph:
                 "aformat=sample_fmts=fltp:channel_layouts=stereo",
                 f"atrim=duration={_num(vis.length)}",
             ]
-            vol = _num(clip.volume)
             o, cd = _num(vis.into), _num(clip.duration)
+            vol0, vol_kf = _prop(clip, "volume", vis, False)
+            vol = f"({keyframes.expr(vol_kf, f'(t+{o})')})" if vol_kf else _num(vol0)
             expr = vol
             if clip.fade_in > EPS:
                 expr += f"*max(0,min(1,(t+{o})/{_num(clip.fade_in)}))"
             if clip.fade_out > EPS:
                 expr += f"*max(0,min(1,({cd}-t-{o})/{_num(clip.fade_out)}))"
-            chain.append(f"volume='{expr}':eval=frame" if expr != vol else f"volume={vol}")
+            animated_vol = expr != vol or bool(vol_kf)
+            chain.append(f"volume='{expr}':eval=frame" if animated_vol else f"volume={vol}")
             delay_ms = int(round(vis.offset * 1000))
             if delay_ms > 0:
                 chain.append(f"adelay={delay_ms}:all=1")
@@ -266,11 +369,11 @@ def build(project: Project, win: Window) -> Graph:
             f"format=yuv420p[base]"
         )
         current = "base"
-        for n, (label, vis, geo) in enumerate(video_labels):
+        for n, (label, vis, ox, oy) in enumerate(video_labels):
             out = f"ov{n}"
             a, b = vis.offset, vis.offset + vis.length
             g.filters.append(
-                f"[{current}][{label}]overlay=x={_num(geo.cx * k)}-w/2:y={_num(geo.cy * k)}-h/2"
+                f"[{current}][{label}]overlay=x={ox}:y={oy}"
                 f":eof_action=pass:enable='between(t,{_num(a - EPS)},{_num(b - EPS)})'[{out}]"
             )
             current = out

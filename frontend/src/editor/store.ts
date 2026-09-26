@@ -1,6 +1,7 @@
 import { create } from 'zustand'
-import type { Asset, Clip, ClipType, Project, ProjectSettings, TextStyle, Timeline, Track, TrackKind } from '../api/types'
+import type { AnimProp, Asset, Clip, ClipType, Ease, Project, ProjectSettings, TextStyle, Timeline, Track, TrackKind } from '../api/types'
 import { clamp, uid } from '../lib/format'
+import { framesOf, keyIndexAt, localTime, propAt, shiftKeyframes, staticValue, upsertKey } from './keyframes'
 
 /** The user-editable part of a project (what undo/redo and autosave cover). */
 export interface Doc {
@@ -79,6 +80,12 @@ interface EditorState {
   rename: (name: string) => void
   updateSettings: (s: Partial<ProjectSettings>) => void
   updateClip: (id: string, patch: ClipPatch) => void
+  /** Set animatable values at the playhead: keys them if animated, else static. */
+  setProps: (id: string, values: Partial<Record<AnimProp, number>>) => void
+  /** Add a keyframe at the playhead (current value), or remove the one there. */
+  toggleKey: (id: string, prop: AnimProp) => void
+  setKeyEase: (id: string, ease: Ease) => void
+  clearKeys: (id: string, prop?: AnimProp) => void
   addAssetClip: (asset: Asset, opts?: { trackId?: string; start?: number }) => string | null
   addTextClip: () => string
   moveClip: (id: string, start: number, trackId: string) => void
@@ -155,6 +162,7 @@ function makeClip(partial: Partial<Clip> & Pick<Clip, 'track_id' | 'type'>): Cli
     transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, flip_h: false, flip_v: false },
     crop: { left: 0, top: 0, right: 0, bottom: 0 },
     text: null,
+    keyframes: {},
     ...partial,
   }
 }
@@ -166,6 +174,7 @@ export function applyPatch(c: Clip, patch: ClipPatch): Clip {
     transform: patch.transform ? { ...c.transform, ...patch.transform } : c.transform,
     crop: patch.crop ? { ...c.crop, ...patch.crop } : c.crop,
     text: patch.text && c.text ? { ...c.text, ...patch.text } : c.text,
+    keyframes: patch.keyframes ?? c.keyframes ?? {},
   }
 }
 
@@ -275,6 +284,90 @@ export const useEditor = create<EditorState>((set, get) => {
 
     updateClip: (id, patch) => setClips((clips) => clips.map((c) => (c.id === id ? applyPatch(c, patch) : c))),
 
+    setProps: (id, values) => {
+      const { playhead, doc } = get()
+      const fps = doc.settings.fps
+      setClips((clips) =>
+        clips.map((c) => {
+          if (c.id !== id) return c
+          let next = c
+          for (const [prop, v] of Object.entries(values) as [AnimProp, number][]) {
+            const frames = framesOf(next, prop)
+            if (frames) {
+              const u = localTime(next, playhead, fps)
+              next = { ...next, keyframes: { ...next.keyframes, [prop]: upsertKey(frames, u, v, fps) } }
+            } else if (prop === 'volume') next = { ...next, volume: v }
+            else next = { ...next, transform: { ...next.transform, [prop]: v } }
+          }
+          return next
+        }),
+      )
+    },
+
+    toggleKey: (id, prop) => {
+      const { playhead, doc } = get()
+      const fps = doc.settings.fps
+      setClips((clips) =>
+        clips.map((c) => {
+          if (c.id !== id) return c
+          const frames = framesOf(c, prop)
+          const u = localTime(c, playhead, fps)
+          const i = keyIndexAt(frames, u, fps)
+          if (frames && i >= 0) {
+            const rest = frames.filter((_, j) => j !== i)
+            const keyframes = { ...c.keyframes, [prop]: rest }
+            if (!rest.length) {
+              // Last key removed: keep the value it had as the static value.
+              delete keyframes[prop]
+              const v = frames[i].v
+              return prop === 'volume'
+                ? { ...c, keyframes, volume: v }
+                : { ...c, keyframes, transform: { ...c.transform, [prop]: v } }
+            }
+            return { ...c, keyframes }
+          }
+          const v = frames ? propAt(c, prop, playhead) : staticValue(c, prop)
+          return { ...c, keyframes: { ...c.keyframes, [prop]: upsertKey(frames, u, v, fps) } }
+        }),
+      )
+    },
+
+    setKeyEase: (id, ease) => {
+      const { playhead, doc } = get()
+      const fps = doc.settings.fps
+      setClips((clips) =>
+        clips.map((c) => {
+          if (c.id !== id) return c
+          const u = localTime(c, playhead, fps)
+          const keyframes: Clip['keyframes'] = {}
+          for (const [prop, frames] of Object.entries(c.keyframes ?? {}) as [AnimProp, Clip['keyframes'][AnimProp]][]) {
+            const i = keyIndexAt(frames, u, fps)
+            keyframes[prop] = i >= 0 ? frames!.map((k, j) => (j === i ? { ...k, ease } : k)) : frames
+          }
+          return { ...c, keyframes }
+        }),
+      )
+    },
+
+    clearKeys: (id, prop) => {
+      const { playhead } = get()
+      setClips((clips) =>
+        clips.map((c) => {
+          if (c.id !== id) return c
+          const props = prop ? [prop] : (Object.keys(c.keyframes ?? {}) as AnimProp[])
+          let next: Clip = { ...c, keyframes: { ...c.keyframes } }
+          for (const p of props) {
+            if (!framesOf(c, p)) continue
+            // Freeze the value currently shown so nothing jumps.
+            const v = propAt(c, p, playhead)
+            delete next.keyframes[p]
+            next = p === 'volume' ? { ...next, volume: v } : { ...next, transform: { ...next.transform, [p]: v } }
+          }
+          return next
+        }),
+      )
+    },
+
     addAssetClip: (asset, opts = {}) => {
       const { doc, playhead } = get()
       const type: ClipType = asset.kind
@@ -339,6 +432,7 @@ export const useEditor = create<EditorState>((set, get) => {
             duration: c.duration - left,
             in_point: c.in_point + left * c.speed,
             fade_in: 0,
+            keyframes: shiftKeyframes(c.keyframes, -left) ?? {},
           }
           newSel.push(b.id)
           return [a, b]

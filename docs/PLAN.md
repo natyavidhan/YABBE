@@ -50,7 +50,9 @@ FFmpeg on the server.
                 "transform": { "x", "y", "scale", "rotation", "opacity", "flip_h", "flip_v" },
                 "crop": { "left", "top", "right", "bottom" },      // fractions 0..1
                 "text": { "content", "font", "size", "color", "background",
-                          "stroke_color", "stroke_width", "align", "bold", "italic" } } ]
+                          "stroke_color", "stroke_width", "align", "bold", "italic" },
+                "keyframes": { "x|y|scale|rotation|opacity|volume":
+                               [ { "t": 0.0, "v": 1.0, "ease": "linear|ease_in|ease_out|ease_in_out|hold" } ] } } ]
 }
 ```
 
@@ -59,6 +61,12 @@ FFmpeg on the server.
   project pixels. Media is first "contain"-fitted to the canvas (after crop),
   then multiplied by `scale`. Text uses its natural rasterised size × `scale`.
 * Track order: `tracks[0]` is the top row in the UI and the top-most layer.
+* Keyframe `t` is seconds from the clip's start (keys may sit outside the clip
+  after trims/splits and still shape the curve). A property with keyframes
+  ignores its static value. Rendering: position → `overlay` expressions,
+  scale → per-frame `scale` padded to a fixed canvas, rotation → `rotate`
+  expression, opacity → `sendcmd` driving `colorchannelmixer`, volume →
+  `volume` expression. Single frames evaluate the curve in Python instead.
 
 ## v1 feature list
 
@@ -92,6 +100,8 @@ Ops
 - [x] Single container (Dockerfile + compose) serving API and built UI
 - [x] Dev: `uvicorn` + `vite` with proxy
 
+- [x] Keyframes for position, scale, rotation, opacity and volume with easing
+
 ## Later
-Transitions, keyframes, effects/filters (colour, blur), audio ducking, captions
+Transitions, keyframable crop/colour, effects/filters (colour, blur), audio ducking, captions
 import (SRT), render queue across projects, WebSocket push instead of polling.

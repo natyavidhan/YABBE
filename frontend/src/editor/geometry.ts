@@ -1,9 +1,12 @@
 import type { Asset, Clip, ProjectSettings } from '../api/types'
+import { transformAt } from './keyframes'
 import { textKey } from './store'
 
 /** Mirrors backend compositor.layer_geometry (project pixels). */
 export interface Layer {
   clip: Clip
+  /** The clip's transform evaluated at the viewed time (keyframes applied). */
+  transform: Clip['transform']
   cx: number
   cy: number
   width: number
@@ -30,22 +33,25 @@ export function layerOf(
   settings: ProjectSettings,
   assets: Map<string, Asset>,
   textSizes: Record<string, { width: number; height: number }>,
+  time?: number,
 ): Layer | null {
   const size = sourceSize(clip, assets, textSizes)
+  const tr = time === undefined ? clip.transform : transformAt(clip, time)
   if (!size) return null
   const cw = size.width * Math.max(0.01, 1 - clip.crop.left - clip.crop.right)
   const ch = size.height * Math.max(0.01, 1 - clip.crop.top - clip.crop.bottom)
   const fit = clip.type === 'text' ? 1 : Math.min(settings.width / cw, settings.height / ch)
   const bw = cw * fit
   const bh = ch * fit
-  const s = clip.transform.scale
+  const s = tr.scale
   return {
     clip,
-    cx: settings.width / 2 + clip.transform.x,
-    cy: settings.height / 2 + clip.transform.y,
+    transform: tr,
+    cx: settings.width / 2 + tr.x,
+    cy: settings.height / 2 + tr.y,
     width: bw * s,
     height: bh * s,
-    rotation: clip.transform.rotation,
+    rotation: tr.rotation,
     baseWidth: bw,
     baseHeight: bh,
   }

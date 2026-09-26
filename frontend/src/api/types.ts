@@ -73,6 +73,16 @@ export interface TextStyle {
 
 export type ClipType = 'video' | 'audio' | 'image' | 'text'
 
+export type AnimProp = 'x' | 'y' | 'scale' | 'rotation' | 'opacity' | 'volume'
+export type Ease = 'linear' | 'ease_in' | 'ease_out' | 'ease_in_out' | 'hold'
+
+/** ``t`` is seconds from the clip's start; ``ease`` shapes the segment to the next key. */
+export interface Keyframe {
+  t: number
+  v: number
+  ease: Ease
+}
+
 export interface Clip {
   id: string
   track_id: string
@@ -89,6 +99,7 @@ export interface Clip {
   transform: Transform
   crop: Crop
   text: TextStyle | null
+  keyframes: Partial<Record<AnimProp, Keyframe[]>>
 }
 
 export interface Project {

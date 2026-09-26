@@ -3,6 +3,9 @@ import {
   AlignLeft,
   AlignRight,
   Bold,
+  ChevronLeft,
+  ChevronRight,
+  Diamond,
   Crop as CropIcon,
   FlipHorizontal2,
   FlipVertical2,
@@ -15,13 +18,15 @@ import {
   Timer,
   Type,
   Volume2,
+  X,
 } from 'lucide-react'
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { api } from '../api/client'
-import type { Asset, Clip } from '../api/types'
+import type { AnimProp, Asset, Clip, Ease } from '../api/types'
 import { IconButton, inputClass, NumberInput } from '../components/ui'
 import { formatDuration } from '../lib/format'
 import { fillScale, sourceSize } from './geometry'
+import { allKeyTimes, EASES, framesOf, keyIndexAt, localTime, propAt } from './keyframes'
 import { ProjectSettingsForm } from './ProjectSettings'
 import { clipEnd, maxClipDuration, MIN_CLIP, overlaps, useEditor, type ClipPatch } from './store'
 
@@ -117,6 +122,7 @@ function SliderRow({
   display = (v) => v,
   parse = (v) => v,
   precision = 2,
+  after,
 }: {
   label: string
   value: number
@@ -128,6 +134,7 @@ function SliderRow({
   display?: (v: number) => number
   parse?: (v: number) => number
   precision?: number
+  after?: ReactNode
 }) {
   const { beginGesture, endGesture } = useEditor.getState()
   return (
@@ -157,6 +164,7 @@ function SliderRow({
             suffix={suffix}
           />
         </div>
+        {after}
       </div>
     </Row>
   )
@@ -175,6 +183,24 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
   const visual = clip.type !== 'audio'
   const hasAudio = (clip.type === 'audio' || clip.type === 'video') && (asset?.has_audio ?? false)
   const scrub = { onScrubStart: beginGesture, onScrubEnd: endGesture }
+  const playhead = useEditor((s) => s.playhead)
+  // Animatable values shown/edited at the playhead (keyframed props auto-key).
+  const val = (p: AnimProp) => propAt(clip, p, playhead)
+  const setP = (values: Partial<Record<AnimProp, number>>) => {
+    if (!locked) useEditor.getState().setProps(clip.id, values)
+  }
+  const key = (p: AnimProp) => <KeyButton clip={clip} prop={p} disabled={locked} />
+  const withKey = (p: AnimProp, input: ReactNode) => (
+    <div className="flex min-w-0 items-center gap-1">
+      <div className="min-w-0 flex-1">{input}</div>
+      {key(p)}
+    </div>
+  )
+  const withoutKeys = (props: AnimProp[]): Clip['keyframes'] => {
+    const kf = { ...clip.keyframes }
+    for (const p of props) delete kf[p]
+    return kf
+  }
 
   const title =
     clip.type === 'text' ? 'Text' : (asset?.original_name ?? 'Missing media')
@@ -247,37 +273,50 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
         <Section
           icon={<Move size={14} />}
           title="Transform"
-          onReset={() => set({ transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, flip_h: false, flip_v: false } })}
+          onReset={() =>
+            set({
+              transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, flip_h: false, flip_v: false },
+              keyframes: withoutKeys(['x', 'y', 'scale', 'rotation', 'opacity']),
+            })
+          }
         >
+          <KeyframeBar clip={clip} disabled={locked} />
           <div className="grid grid-cols-2 gap-2">
-            <NumberInput label="X" value={clip.transform.x} onChange={(x) => set({ transform: { x } })} step={1} precision={0} suffix="px" {...scrub} />
-            <NumberInput label="Y" value={clip.transform.y} onChange={(y) => set({ transform: { y } })} step={1} precision={0} suffix="px" {...scrub} />
-            <NumberInput
-              label="Scale"
-              value={clip.transform.scale * 100}
-              onChange={(v) => set({ transform: { scale: Math.max(1, v) / 100 } })}
-              step={1}
-              min={1}
-              max={2000}
-              precision={1}
-              suffix="%"
-              {...scrub}
-            />
-            <NumberInput
-              label="Rotate"
-              value={clip.transform.rotation}
-              onChange={(rotation) => set({ transform: { rotation } })}
-              step={1}
-              min={-360}
-              max={360}
-              precision={1}
-              suffix="°"
-              {...scrub}
-            />
+            {withKey('x', <NumberInput label="X" value={val('x')} onChange={(x) => setP({ x })} step={1} precision={0} suffix="px" {...scrub} />)}
+            {withKey('y', <NumberInput label="Y" value={val('y')} onChange={(y) => setP({ y })} step={1} precision={0} suffix="px" {...scrub} />)}
+            {withKey(
+              'scale',
+              <NumberInput
+                label="Scale"
+                value={val('scale') * 100}
+                onChange={(v) => setP({ scale: Math.max(1, v) / 100 })}
+                step={1}
+                min={1}
+                max={2000}
+                precision={1}
+                suffix="%"
+                {...scrub}
+              />,
+            )}
+            {withKey(
+              'rotation',
+              <NumberInput
+                label="Rotate"
+                value={val('rotation')}
+                onChange={(rotation) => setP({ rotation })}
+                step={1}
+                min={-3600}
+                max={3600}
+                precision={1}
+                suffix="°"
+                {...scrub}
+              />,
+            )}
           </div>
           <SliderRow
             label="Opacity"
-            value={clip.transform.opacity}
+            after={key('opacity')}
+            value={val('opacity')}
             min={0}
             max={100}
             step={1}
@@ -285,7 +324,7 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
             suffix="%"
             display={(v) => Math.round(v * 100)}
             parse={(v) => v / 100}
-            onChange={(opacity) => set({ transform: { opacity } })}
+            onChange={(opacity) => setP({ opacity })}
           />
           <div className="flex items-center gap-1">
             <IconButton label="Flip horizontally" active={clip.transform.flip_h} onClick={() => set({ transform: { flip_h: !clip.transform.flip_h } })}>
@@ -299,14 +338,14 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
               <>
                 <button
                   className="flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted hover:bg-raised hover:text-fg"
-                  onClick={() => set({ transform: { scale: 1, x: 0, y: 0 } })}
+                  onClick={() => setP({ scale: 1, x: 0, y: 0 })}
                   title="Fit inside the canvas"
                 >
                   <Minimize size={12} /> Fit
                 </button>
                 <button
                   className="flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted hover:bg-raised hover:text-fg"
-                  onClick={() => size && set({ transform: { scale: Math.round(fillScale(clip, settings, size) * 1000) / 1000, x: 0, y: 0 } })}
+                  onClick={() => size && setP({ scale: Math.round(fillScale(clip, settings, size) * 1000) / 1000, x: 0, y: 0 })}
                   title="Fill the whole canvas"
                 >
                   <Maximize size={12} /> Fill
@@ -348,10 +387,16 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
       )}
 
       {hasAudio && (
-        <Section icon={<Volume2 size={14} />} title="Audio" onReset={() => set({ volume: 1, fade_in: 0, fade_out: 0, muted: false })}>
+        <Section
+          icon={<Volume2 size={14} />}
+          title="Audio"
+          onReset={() => set({ volume: 1, fade_in: 0, fade_out: 0, muted: false, keyframes: withoutKeys(['volume']) })}
+        >
+          {!visual && <KeyframeBar clip={clip} disabled={locked} />}
           <SliderRow
             label="Volume"
-            value={clip.volume}
+            after={key('volume')}
+            value={val('volume')}
             min={0}
             max={400}
             step={1}
@@ -359,7 +404,7 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
             suffix="%"
             display={(v) => Math.round(v * 100)}
             parse={(v) => v / 100}
-            onChange={(volume) => set({ volume })}
+            onChange={(volume) => setP({ volume })}
           />
           <SliderRow label="Fade in" value={clip.fade_in} min={0} max={Math.min(10, clip.duration)} step={0.1} precision={1} suffix="s" onChange={(fade_in) => set({ fade_in })} />
           <SliderRow label="Fade out" value={clip.fade_out} min={0} max={Math.min(10, clip.duration)} step={0.1} precision={1} suffix="s" onChange={(fade_out) => set({ fade_out })} />
@@ -369,6 +414,103 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
           </label>
         </Section>
       )}
+    </div>
+  )
+}
+
+/** ◆ next to an animatable field: add/remove a keyframe at the playhead. */
+function KeyButton({ clip, prop, disabled }: { clip: Clip; prop: AnimProp; disabled?: boolean }) {
+  const playhead = useEditor((s) => s.playhead)
+  const fps = useEditor((s) => s.doc.settings.fps)
+  const frames = framesOf(clip, prop)
+  const u = localTime(clip, playhead, fps)
+  const inside = u >= -1e-6 && u <= clip.duration + 1e-6
+  const onKey = keyIndexAt(frames, u, fps) >= 0
+  const label = !inside
+    ? 'Move the playhead over this clip to add keyframes'
+    : onKey
+      ? 'Remove keyframe here'
+      : frames
+        ? 'Add keyframe here (edits here also add one)'
+        : 'Animate: add a keyframe here'
+  return (
+    <button
+      type="button"
+      disabled={disabled || !inside}
+      onClick={() => useEditor.getState().toggleKey(clip.id, prop)}
+      title={label}
+      aria-label={label}
+      aria-pressed={onKey}
+      className={`flex h-7 w-6 shrink-0 items-center justify-center rounded transition-colors disabled:opacity-30 ${
+        onKey ? 'text-warn' : frames ? 'text-warn/70 hover:text-warn' : 'text-faint hover:text-fg'
+      }`}
+    >
+      <Diamond size={12} fill={onKey ? 'currentColor' : 'none'} strokeWidth={2.2} />
+    </button>
+  )
+}
+
+/** Keyframe navigation + easing for the keys under the playhead. */
+function KeyframeBar({ clip, disabled }: { clip: Clip; disabled?: boolean }) {
+  const playhead = useEditor((s) => s.playhead)
+  const fps = useEditor((s) => s.doc.settings.fps)
+  const times = allKeyTimes(clip)
+  if (!times.length)
+    return (
+      <p className="flex items-center gap-1.5 text-[11px] text-faint">
+        <Diamond size={10} /> Click a diamond to animate a property over time.
+      </p>
+    )
+  const u = localTime(clip, playhead, fps)
+  const tol = 0.5 / fps
+  const prev = [...times].reverse().find((t) => t < u - tol)
+  const next = times.find((t) => t > u + tol)
+  const here = (Object.keys(clip.keyframes) as AnimProp[])
+    .map((p) => {
+      const f = framesOf(clip, p)
+      const i = keyIndexAt(f, u, fps)
+      return i >= 0 ? f![i] : null
+    })
+    .filter((k) => k !== null)
+  const ease = here[0]?.ease
+  const jump = (t: number) => {
+    const s = useEditor.getState()
+    s.setPlaying(false)
+    s.setPlayhead(clip.start + t)
+  }
+  return (
+    <div className="flex items-center gap-1 rounded-md bg-warn/10 px-1.5 py-1">
+      <Diamond size={11} className="ml-0.5 text-warn" fill="currentColor" />
+      <span className="text-[11px] text-warn">{times.length} key{times.length === 1 ? '' : 's'}</span>
+      <IconButton label="Previous keyframe" disabled={prev === undefined} onClick={() => prev !== undefined && jump(prev)} className="h-6! w-6!">
+        <ChevronLeft size={14} />
+      </IconButton>
+      <IconButton label="Next keyframe" disabled={next === undefined} onClick={() => next !== undefined && jump(next)} className="h-6! w-6!">
+        <ChevronRight size={14} />
+      </IconButton>
+      <select
+        className="h-6 min-w-0 flex-1 rounded border border-line bg-bg px-1 text-[11px] disabled:opacity-40"
+        value={ease ?? ''}
+        disabled={disabled || !here.length}
+        onChange={(e) => useEditor.getState().setKeyEase(clip.id, e.target.value as Ease)}
+        title={here.length ? 'Easing from this keyframe to the next' : 'Move to a keyframe to change its easing'}
+        aria-label="Keyframe easing"
+      >
+        {!here.length && <option value="">Easing…</option>}
+        {EASES.map((e) => (
+          <option key={e.value} value={e.value}>
+            {e.label}
+          </option>
+        ))}
+      </select>
+      <IconButton
+        label="Remove all keyframes"
+        disabled={disabled}
+        onClick={() => useEditor.getState().clearKeys(clip.id)}
+        className="h-6! w-6! hover:text-danger!"
+      >
+        <X size={13} />
+      </IconButton>
     </div>
   )
 }

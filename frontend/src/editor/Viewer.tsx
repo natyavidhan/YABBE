@@ -376,7 +376,7 @@ function TransformOverlay({ width }: { width: number }) {
     return doc.clips
       .filter((c) => c.type !== 'audio' && !hidden.has(c.track_id) && c.start <= playhead + 1e-6 && clipEnd(c) > playhead + 1e-6)
       .sort((a, b) => (rank.get(a.track_id) ?? 0) - (rank.get(b.track_id) ?? 0))
-      .map((c) => layerOf(c, doc.settings, assetMap, textSizes))
+      .map((c) => layerOf(c, doc.settings, assetMap, textSizes, playhead))
       .filter((l): l is Layer => l !== null)
   }, [doc, playhead, assetMap, textSizes])
 
@@ -402,17 +402,17 @@ function TransformOverlay({ width }: { width: number }) {
         if (v) x = 0
         if (h) y = 0
         setGuides({ v, h })
-        s.updateClip(d.id, { transform: { x: Math.round(x), y: Math.round(y) } })
+        s.setProps(d.id, { x: Math.round(x), y: Math.round(y) })
       } else if (d.kind === 'scale') {
         const dist = Math.hypot(p.x - d.cx, p.y - d.cy)
         const scale = clamp((d.scale * dist) / Math.max(1, d.dist), 0.01, 20)
-        s.updateClip(d.id, { transform: { scale: Math.round(scale * 1000) / 1000 } })
+        s.setProps(d.id, { scale: Math.round(scale * 1000) / 1000 })
       } else {
         const angle = (Math.atan2(p.y - d.cy, p.x - d.cx) * 180) / Math.PI
         let rot = d.rotation + angle - d.angle
         rot = ((((rot + 180) % 360) + 360) % 360) - 180
         if (e.shiftKey) rot = Math.round(rot / 15) * 15
-        s.updateClip(d.id, { transform: { rotation: Math.round(rot * 10) / 10 } })
+        s.setProps(d.id, { rotation: Math.round(rot * 10) / 10 })
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -451,7 +451,7 @@ function TransformOverlay({ width }: { width: number }) {
     if (e.shiftKey) s.toggleSelect(hit.clip.id)
     else if (!selection.includes(hit.clip.id)) s.select([hit.clip.id])
     e.preventDefault()
-    startDrag({ kind: 'move', id: hit.clip.id, px: p.x, py: p.y, x: hit.clip.transform.x, y: hit.clip.transform.y })
+    startDrag({ kind: 'move', id: hit.clip.id, px: p.x, py: p.y, x: hit.transform.x, y: hit.transform.y })
   }
 
   return (
@@ -488,7 +488,7 @@ function TransformOverlay({ width }: { width: number }) {
                       cx: l.cx,
                       cy: l.cy,
                       dist: Math.hypot(p.x - l.cx, p.y - l.cy),
-                      scale: l.clip.transform.scale,
+                      scale: l.transform.scale,
                     })
                   }}
                   className={`pointer-events-auto absolute border border-accent-2 bg-white ${coarse ? 'rounded-full' : 'rounded-sm'}`}
@@ -518,7 +518,7 @@ function TransformOverlay({ width }: { width: number }) {
                       cx: l.cx,
                       cy: l.cy,
                       angle: (Math.atan2(p.y - l.cy, p.x - l.cx) * 180) / Math.PI,
-                      rotation: l.clip.transform.rotation,
+                      rotation: l.transform.rotation,
                     })
                   }}
                   className="pointer-events-auto absolute left-1/2 -translate-x-1/2 cursor-grab rounded-full border border-accent-2 bg-white"

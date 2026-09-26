@@ -63,6 +63,11 @@ videos can be uploaded.
 * **Clip properties** — position, scale, rotation, opacity, flip, crop,
   speed (0.25×–4×), volume (0–400 %) with fade in / out, text clips with font,
   size, colour, outline and background box.
+* **Keyframes** — animate position, scale, rotation, opacity and volume with
+  linear, ease in/out, ease in-out or hold curves. Click ◆ next to a property
+  to key it; once animated, any edit at the playhead (inspector or on-canvas
+  handles) adds or updates a keyframe. Diamonds on the selected clip jump to
+  keys; the bar above the transform fields navigates keys and sets easing.
 * **Preview** — paused frames are rendered exactly by FFmpeg; playback streams
   a lazily rendered HLS preview, so you only wait for the parts you watch.
 * **Export** — H.264 / AAC MP4 at project or lower resolution with quality

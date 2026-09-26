@@ -109,6 +109,30 @@ class TextStyle(_Model):
 
 ClipType = Literal["video", "audio", "image", "text"]
 
+AnimProp = Literal["x", "y", "scale", "rotation", "opacity", "volume"]
+ANIM_PROPS: tuple[str, ...] = ("x", "y", "scale", "rotation", "opacity", "volume")
+Ease = Literal["linear", "ease_in", "ease_out", "ease_in_out", "hold"]
+
+# Valid ranges for animated values (same limits as the static fields).
+ANIM_LIMITS: dict[str, tuple[float, float]] = {
+    "x": (-100_000, 100_000),
+    "y": (-100_000, 100_000),
+    "scale": (0.01, 20),
+    "rotation": (-100_000, 100_000),
+    "opacity": (0, 1),
+    "volume": (0, 4),
+}
+
+
+class Keyframe(_Model):
+    """A value at a time. ``t`` is seconds from the clip's start on the
+    timeline (it may fall outside the clip after trims/splits, where it still
+    shapes the curve); ``ease`` shapes the segment from this keyframe to the next."""
+
+    t: float
+    v: float
+    ease: Ease = "linear"
+
 
 class Clip(_Model):
     id: str = Field(default_factory=lambda: new_id("c_"))
@@ -126,6 +150,29 @@ class Clip(_Model):
     transform: Transform = Field(default_factory=Transform)
     crop: Crop = Field(default_factory=Crop)
     text: Optional[TextStyle] = None
+    # Animated properties; a property with keyframes ignores its static value.
+    keyframes: dict[AnimProp, list[Keyframe]] = Field(default_factory=dict)
+
+    @field_validator("keyframes")
+    @classmethod
+    def _tidy_keyframes(cls, value: dict[str, list[Keyframe]]) -> dict[str, list[Keyframe]]:
+        out: dict[str, list[Keyframe]] = {}
+        for prop, frames in value.items():
+            if not frames:
+                continue
+            lo, hi = ANIM_LIMITS[prop]
+            by_time: dict[float, Keyframe] = {}
+            for k in frames:  # one keyframe per time (last wins), values clamped
+                by_time[round(k.t, 6)] = Keyframe(t=k.t, v=min(hi, max(lo, k.v)), ease=k.ease)
+            out[prop] = sorted(by_time.values(), key=lambda k: k.t)
+        return out
+
+    def animated(self, prop: str) -> Optional[list[Keyframe]]:
+        frames = self.keyframes.get(prop)  # type: ignore[call-overload]
+        return frames or None
+
+    def static_value(self, prop: str) -> float:
+        return self.volume if prop == "volume" else float(getattr(self.transform, prop))
 
     @property
     def end(self) -> float:

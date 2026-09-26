@@ -22,6 +22,7 @@ import type { Asset, Clip, Track } from '../api/types'
 import { Button, IconButton, Modal, inputClass } from '../components/ui'
 import { clamp } from '../lib/format'
 import { isTouchEvent, useIsMobile } from '../lib/useMedia'
+import { allKeyTimes, shiftKeyframes } from './keyframes'
 import { ASSET_MIME } from './MediaBin'
 import { clipEnd, docDuration, maxClipDuration, MIN_CLIP, overlaps, useEditor } from './store'
 
@@ -252,6 +253,8 @@ export function Timeline({ projectId }: { projectId: string }) {
             start,
             duration: clipEnd(o) - start,
             in_point: hasSource ? Math.max(0, o.in_point + (start - o.start) * o.speed) : o.in_point,
+            // Keyframes are clip-relative: keep them pinned to the same moments.
+            keyframes: shiftKeyframes(o.keyframes, o.start - start) ?? {},
           })
         } else {
           const nextStart = Math.min(Infinity, ...others.filter((c) => c.start >= clipEnd(o) - 1e-6).map((c) => c.start))
@@ -805,6 +808,7 @@ const TimelineClip = memo(function TimelineClip({
           style={{ width: clip.fade_out * zoom }}
         />
       )}
+      {selected && <KeyMarkers clip={clip} zoom={zoom} compact={compact} />}
       {!locked && !compact && (
         <>
           <div
@@ -837,6 +841,39 @@ const TimelineClip = memo(function TimelineClip({
     </div>
   )
 })
+
+/** Keyframe diamonds along the bottom of the selected clip; click to jump there. */
+function KeyMarkers({ clip, zoom, compact }: { clip: Clip; zoom: number; compact: boolean }) {
+  const playhead = useEditor((s) => s.playhead)
+  const fps = useEditor((s) => s.doc.settings.fps)
+  const times = allKeyTimes(clip).filter((t) => t >= -1e-6 && t <= clip.duration + 1e-6)
+  if (!times.length) return null
+  const size = compact ? 14 : 10
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-0.5 z-[3]" style={{ height: size }}>
+      {times.map((t) => {
+        const current = Math.abs(clip.start + t - playhead) <= 0.5 / fps
+        return (
+          <button
+            key={t}
+            title={`Keyframe at ${t.toFixed(2)}s — click to jump`}
+            aria-label={`Jump to keyframe at ${t.toFixed(2)} seconds`}
+            onPointerDown={(e) => {
+              e.stopPropagation()
+              const s = useEditor.getState()
+              s.setPlaying(false)
+              s.setPlayhead(clip.start + t)
+            }}
+            className={`pointer-events-auto absolute top-0 rotate-45 rounded-[2px] border border-black/70 ${
+              current ? 'bg-warn' : 'bg-white/90 hover:bg-warn'
+            }`}
+            style={{ left: t * zoom - size / 2, width: size * 0.72, height: size * 0.72, touchAction: 'none' }}
+          />
+        )
+      })}
+    </div>
+  )
+}
 
 function Filmstrip({
   projectId,
