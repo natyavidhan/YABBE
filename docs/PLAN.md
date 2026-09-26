@@ -69,6 +69,11 @@ FFmpeg on the server.
   scale → per-frame `scale` padded to a fixed canvas, rotation → `rotate`
   expression, opacity → `sendcmd` driving `colorchannelmixer`, volume →
   `volume` expression. Single frames evaluate the curve in Python instead.
+  **Update:** all animation now renders by sampling the curve per output frame
+  in Python (engine/curves.py) and driving the filters with `sendcmd` /
+  `asendcmd` (overlay x/y, scale w/h, rotate angle, colorchannelmixer alpha,
+  volume). The frontend mirrors the maths in src/editor/curves.ts; both are
+  tested against backend/tests/fixtures/curves.json.
   Text style keyframes re-rasterise the text with Pillow for every frame whose
   style differs (cached), centred on a fixed transparent canvas, and feed the
   frames to FFmpeg through an ffconcat list.
@@ -109,6 +114,10 @@ Ops
 - [x] Text style keyframes: size, colours, outline width, box, padding, spacing
 - [x] Clip markers pinned to footage (move / trim / split / speed safe), snapping, navigation
 - [x] Browser-only master preview volume
+- [x] Graph editor: Bézier handles + handle modes, presets (easy ease, easing
+      families, back/elastic/bounce, saved curves), F9 shortcuts, box select,
+      copy/paste, stretch, snapping; per-property show-in-graph toggles;
+      desktop side panel / phone takeover
 
 ## Later
 Transitions, keyframable crop/colour, effects/filters (colour, blur), audio ducking, captions

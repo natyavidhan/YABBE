@@ -79,13 +79,10 @@ export function bezierHandles(a: Keyframe, b: Keyframe, v0: number, v1: number):
   const span = b.t - a.t
   const ho = a.ho ?? defaultOut(a, b, v0, v1)
   const hi = b.hi ?? defaultIn(a, b, v0, v1)
-  let hx1 = Math.min(Math.max(ho[0], 0), span)
-  let hx2 = Math.min(Math.max(-hi[0], 0), span)
-  if (hx1 + hx2 > span && span > 0) {
-    const k = span / (hx1 + hx2)
-    hx1 *= k
-    hx2 *= k
-  }
+  // Each handle stays within the segment in time; that alone keeps x(s)
+  // monotonic (handles may cross, as in CSS cubic-bezier).
+  const hx1 = Math.min(Math.max(ho[0], 0), span)
+  const hx2 = Math.min(Math.max(-hi[0], 0), span)
   const x1 = span > 0 ? hx1 / span : 0
   const x2 = span > 0 ? 1 - hx2 / span : 1
   return [x1, v0 + ho[1], x2, v1 + hi[1]]

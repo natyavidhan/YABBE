@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { api } from '../api/client'
 import { toast } from '../components/toast'
 import { textStyleAt } from './keyframes'
+import { runEasyEase } from './graph/actions'
 import { allMarkers, docDuration, textKey, useEditor } from './store'
 
 const AUTOSAVE_DELAY = 700
@@ -129,7 +130,10 @@ export function useShortcuts() {
       const fps = s.doc.settings.fps
       const key = e.key.toLowerCase()
       let handled = true
-      if (mod && key === 'z' && !e.shiftKey) s.undo()
+      if (e.key === 'F9') {
+        if (!runEasyEase(mod && e.shiftKey ? 'out' : e.shiftKey ? 'in' : 'both'))
+          toast.info('Put the playhead on a keyframe of the selected clip (or select keys in the graph)')
+      } else if (mod && key === 'z' && !e.shiftKey) s.undo()
       else if (mod && ((key === 'z' && e.shiftKey) || key === 'y')) s.redo()
       else if (mod && key === 'd') s.duplicateSelected()
       else if (mod && key === 'a') s.select(s.doc.clips.map((c) => c.id))
@@ -149,6 +153,7 @@ export function useShortcuts() {
       else if (e.key === 'End') s.setPlayhead(docDuration(s.doc))
       else if (e.key === '=' || e.key === '+') s.setZoom(s.zoom * 1.25)
       else if (e.key === '-') s.setZoom(s.zoom / 1.25)
+      else if (key === 'g') s.setGraphOpen(!s.graphOpen)
       else if (key === 't') s.addTextClip()
       else if (key === 'm') {
         const err = s.addMarker()

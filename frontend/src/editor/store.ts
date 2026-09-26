@@ -1,6 +1,7 @@
 import { create } from 'zustand'
-import type { AnimProp, Asset, Clip, ClipType, Ease, Marker, Project, ProjectSettings, TextStyle, Timeline, Track, TrackKind } from '../api/types'
+import type { AnimProp, Asset, Clip, ClipType, Ease, Keyframe, Marker, Project, ProjectSettings, TextStyle, Timeline, Track, TrackKind } from '../api/types'
 import { clamp, uid } from '../lib/format'
+import { recalcAuto } from './graph/model'
 import { colorPropAt, shiftMarkers, visibleMarkers, framesOf, isColorProp, keyIndexAt, localTime, propAt, shiftKeyframes, staticColor, staticValue, TEXT_COLOR, TEXT_NUMERIC, upsertKey } from './keyframes'
 
 /** The user-editable part of a project (what undo/redo and autosave cover). */
@@ -9,6 +10,22 @@ export interface Doc {
   settings: ProjectSettings
   tracks: Track[]
   clips: Clip[]
+}
+
+/** A keyframe selected in the graph editor (on the selected clip). */
+export interface GraphKey {
+  prop: AnimProp
+  i: number
+}
+
+const graphHiddenKey = (projectId: string) => `yabbe.graphHidden.${projectId}`
+
+function loadGraphHidden(projectId: string): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(graphHiddenKey(projectId)) ?? '{}')
+  } catch {
+    return {}
+  }
 }
 
 export interface Upload {
@@ -54,6 +71,17 @@ interface EditorState {
   snapping: boolean
   uploads: Upload[]
   textSizes: Record<string, { width: number; height: number }>
+
+  // graph editor (view state; not part of the project or undo history)
+  graphOpen: boolean
+  /** `${clipId}:${prop}` -> hidden from the graph editor. */
+  graphHidden: Record<string, boolean>
+  graphSel: GraphKey[]
+  setGraphOpen: (open: boolean) => void
+  setGraphHidden: (clipId: string, prop: AnimProp, hidden: boolean) => void
+  setGraphSel: (sel: GraphKey[]) => void
+  /** Replace a property's keyframes (sorted; auto handles recomputed). */
+  setKeyframes: (clipId: string, prop: AnimProp, frames: Keyframe[]) => void
 
   load: (p: Project) => void
   setAssets: (assets: Asset[]) => void
@@ -277,6 +305,36 @@ export const useEditor = create<EditorState>((set, get) => {
     snapping: true,
     uploads: [],
     textSizes: {},
+    graphOpen: false,
+    graphHidden: {},
+    graphSel: [],
+
+    setGraphOpen: (graphOpen) => set({ graphOpen }),
+    setGraphHidden: (clipId, prop, hidden) => {
+      const next = { ...get().graphHidden }
+      if (hidden) next[`${clipId}:${prop}`] = true
+      else delete next[`${clipId}:${prop}`]
+      set({ graphHidden: next, graphSel: get().graphSel.filter((k) => !(hidden && k.prop === prop)) })
+      const pid = get().projectId
+      if (pid) {
+        try {
+          localStorage.setItem(graphHiddenKey(pid), JSON.stringify(next))
+        } catch {
+          /* ignore */
+        }
+      }
+    },
+    setGraphSel: (graphSel) => set({ graphSel }),
+    setKeyframes: (clipId, prop, frames) =>
+      setClips((clips) =>
+        clips.map((c) => {
+          if (c.id !== clipId) return c
+          const keyframes = { ...c.keyframes }
+          if (frames.length) keyframes[prop] = recalcAuto([...frames].sort((a, b) => a.t - b.t), prop)
+          else delete keyframes[prop]
+          return { ...c, keyframes }
+        }),
+      ),
 
     load: (p) =>
       set({
@@ -292,6 +350,8 @@ export const useEditor = create<EditorState>((set, get) => {
         playhead: 0,
         playing: false,
         uploads: [],
+        graphHidden: loadGraphHidden(p.id),
+        graphSel: [],
       }),
     setAssets: (assets) => set({ assets }),
     markSaved: (version) => set({ savedVersion: Math.max(get().savedVersion, version) }),
@@ -334,7 +394,10 @@ export const useEditor = create<EditorState>((set, get) => {
       })
     },
 
-    select: (ids) => set({ selection: ids }),
+    select: (ids) => {
+      const same = ids.length === get().selection.length && ids.every((id, i) => id === get().selection[i])
+      set(same ? { selection: ids } : { selection: ids, graphSel: [] })
+    },
     toggleSelect: (id) => {
       const sel = get().selection
       set({ selection: sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id] })
@@ -362,7 +425,7 @@ export const useEditor = create<EditorState>((set, get) => {
             const frames = framesOf(next, prop)
             if (frames && v !== null) {
               const u = localTime(next, playhead, fps)
-              next = { ...next, keyframes: { ...next.keyframes, [prop]: upsertKey(frames, u, v, fps) } }
+              next = { ...next, keyframes: { ...next.keyframes, [prop]: recalcAuto(upsertKey(frames, u, v, fps), prop) } }
             } else next = withStatic(next, prop, v)
           }
           return next
@@ -393,7 +456,7 @@ export const useEditor = create<EditorState>((set, get) => {
             ? frames ? colorPropAt(c, prop, playhead) : staticColor(c, prop)
             : frames ? propAt(c, prop, playhead) : staticValue(c, prop)
           if (v === null) return c // e.g. no text box to animate
-          return { ...c, keyframes: { ...c.keyframes, [prop]: upsertKey(frames, u, v, fps) } }
+          return { ...c, keyframes: { ...c.keyframes, [prop]: recalcAuto(upsertKey(frames, u, v, fps), prop) } }
         }),
       )
     },

@@ -60,6 +60,16 @@ videos can be uploaded.
 * **Timeline** — multiple video (layer) and audio tracks; move clips between
   tracks, trim either edge, split, duplicate, snapping, zoom, mute / hide /
   lock tracks, undo / redo.
+* **Graph editor** — press <kbd>G</kbd> (or the curve button in the timeline
+  toolbar) to open a curve editor beside the timeline; on phones it takes over
+  the timeline area. Drag keys and Bézier handles (Alt breaks a handle pair),
+  box-select, double-click a curve to add a key, snap to frames / playhead /
+  markers, copy-paste keys, stretch timing, and pick handle modes (auto,
+  auto-clamped, aligned, free). Presets: Easy Ease (<kbd>F9</kbd>, In
+  <kbd>Shift+F9</kbd>, Out <kbd>Ctrl+Shift+F9</kbd>), Sine / Quad / Cubic /
+  Quart / Quint / Expo / Circ, Back, Elastic and Bounce (with parameters), and
+  your own saved curves. Each animated property has a toggle in the inspector
+  to show or hide it in the graph.
 * **Speed** — 0.25×–4× with a hold-to-repeat stepper and presets; the clip
   resizes on the timeline as you change it, or type a length in **Fit to**
   and the speed is chosen so the same footage plays in exactly that time.
@@ -102,7 +112,7 @@ cd backend && uv sync && uv run uvicorn app.main:app --reload --port 8000
 cd frontend && npm install && npm run dev
 ```
 
-Tests: `cd backend && uv run pytest`
+Tests: `cd backend && uv run pytest` and `cd frontend && npm test`
 
 ### Using it from other devices on your network
 

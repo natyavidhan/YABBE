@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, Download, Film, Keyboard, Redo2, Settings2, SlidersHorizontal, Type, Undo2, X } from 'lucide-react'
+import { ArrowLeft, ChartSpline, Check, Download, Film, Keyboard, Redo2, Settings2, SlidersHorizontal, Type, Undo2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
@@ -14,6 +14,7 @@ import { ProjectSettingsDialog } from '../editor/ProjectSettings'
 import { useEditor } from '../editor/store'
 import { Timeline } from '../editor/Timeline'
 import { Viewer } from '../editor/Viewer'
+import { GraphEditor } from '../editor/graph/GraphEditor'
 
 export default function Editor() {
   const { projectId = '' } = useParams()
@@ -168,12 +169,52 @@ function EditorShell({ projectId }: { projectId: string }) {
       >
         <div className="absolute inset-x-0 -top-1 h-2 group-hover:bg-accent/30" />
       </div>
-      <div style={{ height: timelineHeight }} className="shrink-0">
-        <Timeline projectId={projectId} />
+      <div style={{ height: timelineHeight }} className="flex shrink-0">
+        <div className="min-w-0 flex-1">
+          <Timeline projectId={projectId} />
+        </div>
+        <GraphPanel />
       </div>
 
       {dialogs}
     </div>
+  )
+}
+
+/** Desktop: resizable graph editor docked to the right of the timeline. */
+function GraphPanel() {
+  const open = useEditor((s) => s.graphOpen)
+  const [width, setWidth] = useState(() => {
+    const saved = Number(localStorageGet('yabbe.graphWidth'))
+    return saved > 280 ? saved : Math.round(window.innerWidth * 0.45)
+  })
+  if (!open) return null
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault()
+    const x0 = e.clientX
+    const w0 = width
+    let last = w0
+    const move = (ev: PointerEvent) => {
+      last = Math.min(window.innerWidth - 360, Math.max(300, w0 - (ev.clientX - x0)))
+      setWidth(last)
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      localStorageSet('yabbe.graphWidth', String(last))
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+  return (
+    <>
+      <div onPointerDown={startResize} className="group relative w-1.5 shrink-0 cursor-col-resize border-l border-line bg-panel" title="Drag to resize">
+        <div className="absolute inset-y-0 -left-1 w-2 group-hover:bg-accent/30" />
+      </div>
+      <div style={{ width }} className="min-w-0 shrink-0">
+        <GraphEditor onClose={() => useEditor.getState().setGraphOpen(false)} />
+      </div>
+    </>
   )
 }
 
@@ -193,6 +234,9 @@ function MobileEditor({
 }) {
   const [sheet, setSheet] = useState<SheetKind>(null)
   const selected = useEditor((s) => s.selection.length)
+  const graphOpen = useEditor((s) => s.graphOpen)
+  const closeGraph = () => useEditor.getState().setGraphOpen(false)
+  const timelineArea = graphOpen ? <GraphEditor compact onClose={closeGraph} /> : <Timeline projectId={projectId} />
   // Landscape phones: preview and timeline side by side, panels slide over the timeline.
   const landscape = useMediaQuery('(orientation: landscape)')
   const PREVIEW_H = '38dvh'
@@ -219,6 +263,16 @@ function MobileEditor({
         active={sheet === 'edit'}
         onClick={() => setSheet(sheet === 'edit' ? null : 'edit')}
       />
+      <TabButton
+        icon={<ChartSpline size={18} />}
+        label="Graph"
+        compact={landscape}
+        active={graphOpen}
+        onClick={() => {
+          setSheet(null)
+          useEditor.getState().setGraphOpen(!graphOpen)
+        }}
+      />
     </>
   )
   return (
@@ -241,10 +295,8 @@ function MobileEditor({
             <Viewer projectId={projectId} compact />
           </div>
           <div className="flex min-w-0 flex-1 flex-col">
-            <div className="min-h-0 flex-1">
-              <Timeline projectId={projectId} />
-            </div>
-            <nav className="grid shrink-0 grid-cols-3 border-t border-line bg-panel">{tabs}</nav>
+            <div className="min-h-0 flex-1">{timelineArea}</div>
+            <nav className="grid shrink-0 grid-cols-4 border-t border-line bg-panel">{tabs}</nav>
           </div>
         </div>
       ) : (
@@ -252,10 +304,8 @@ function MobileEditor({
           <div className="flex shrink-0 flex-col bg-bg" style={{ height: PREVIEW_H, minHeight: 200 }}>
             <Viewer projectId={projectId} compact />
           </div>
-          <div className="min-h-0 flex-1 border-t border-line">
-            <Timeline projectId={projectId} />
-          </div>
-          <nav className="grid shrink-0 grid-cols-3 border-t border-line bg-panel pb-[env(safe-area-inset-bottom)]">{tabs}</nav>
+          <div className="min-h-0 flex-1 border-t border-line">{timelineArea}</div>
+          <nav className="grid shrink-0 grid-cols-4 border-t border-line bg-panel pb-[env(safe-area-inset-bottom)]">{tabs}</nav>
         </>
       )}
 
@@ -416,6 +466,9 @@ const SHORTCUTS: [string, string][] = [
   ['T', 'Add a text clip at the playhead'],
   ['M', 'Add a marker on the selected clip'],
   ['[ / ]', 'Previous / next marker'],
+  ['G', 'Open / close the graph editor'],
+  ['F9', 'Easy ease the selected keys (Shift: in, Ctrl+Shift: out)'],
+  ['F · Delete · Ctrl+A', 'In the graph: fit view, delete keys, select all'],
   ['Ctrl+Z / Ctrl+Shift+Z', 'Undo / redo'],
   ['+ / − or Ctrl+Wheel', 'Zoom timeline'],
   ['Esc', 'Clear selection'],

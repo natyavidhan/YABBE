@@ -9,7 +9,7 @@ A segment runs from key ``a`` to key ``b``; ``a.ease`` picks its shape:
 * ``bezier`` — a 2-D cubic Bézier through (t, v) using ``a.ho`` (outgoing
   handle) and ``b.hi`` (incoming handle), both ``(dt, dv)`` offsets from their
   key. Missing handles default to a straight line (⅓ of the segment).
-  Handle times are clamped so time never runs backwards.
+  Each handle's time is clamped to the segment, so time never runs backwards.
 * ``ease_in`` / ``ease_out`` / ``ease_in_out`` — cubic power curves
 * ``back_*`` (overshoot; ``ep[0]`` = overshoot, default 1.70158),
   ``elastic_*`` (``ep[0]`` = oscillations, default 3; ``ep[1]`` = decay,
@@ -107,11 +107,10 @@ def bezier_handles(a: Keyframe, b: Keyframe, v0: float, v1: float) -> tuple[floa
     span = b.t - a.t
     ho = a.ho if a.ho is not None else (span / 3, (v1 - v0) / 3)
     hi = b.hi if b.hi is not None else (-span / 3, -(v1 - v0) / 3)
+    # Each handle stays within the segment in time; that alone keeps x(s)
+    # monotonic (handles may cross, as in CSS cubic-bezier).
     hx1 = min(max(ho[0], 0.0), span)
     hx2 = min(max(-hi[0], 0.0), span)
-    if hx1 + hx2 > span > 0:
-        k = span / (hx1 + hx2)
-        hx1, hx2 = hx1 * k, hx2 * k
     x1 = hx1 / span if span > 0 else 0.0
     x2 = 1 - hx2 / span if span > 0 else 1.0
     return x1, v0 + ho[1], x2, v1 + hi[1]

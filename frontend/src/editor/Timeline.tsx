@@ -2,6 +2,7 @@ import {
   ChevronDown,
   ChevronUp,
   Copy,
+  ChartSpline,
   Eye,
   EyeOff,
   Flag,
@@ -676,6 +677,7 @@ function Toolbar({ compact }: { compact: boolean }) {
   const zoom = useEditor((s) => s.zoom)
   const snapping = useEditor((s) => s.snapping)
   const hasSelection = useEditor((s) => s.selection.length > 0)
+  const graphOpen = useEditor((s) => s.graphOpen)
   const s = useEditor.getState()
   return (
     <div className="flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line px-2">
@@ -718,6 +720,9 @@ function Toolbar({ compact }: { compact: boolean }) {
         <Plus size={13} /> {compact ? 'Audio' : 'Audio track'}
       </button>
       <div className="flex-1" />
+      <IconButton label="Graph editor (G)" active={graphOpen} onClick={() => s.setGraphOpen(!graphOpen)}>
+        <ChartSpline size={15} />
+      </IconButton>
       <IconButton label={snapping ? 'Snapping on' : 'Snapping off'} active={snapping} onClick={() => s.setSnapping(!snapping)}>
         <Magnet size={15} />
       </IconButton>

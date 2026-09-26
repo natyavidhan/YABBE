@@ -5,6 +5,7 @@ import {
   Bold,
   ChevronLeft,
   ChevronRight,
+  ChartSpline,
   Diamond,
   Flag,
   Gauge,
@@ -435,7 +436,8 @@ function KeyButton({ clip, prop, disabled }: { clip: Clip; prop: AnimProp; disab
         ? 'Add keyframe here (edits here also add one)'
         : 'Animate: add a keyframe here'
   return (
-    <button
+    <span className="flex shrink-0 items-center">
+      <button
       type="button"
       disabled={disabled || !inside}
       onClick={() => useEditor.getState().toggleKey(clip.id, prop)}
@@ -447,6 +449,28 @@ function KeyButton({ clip, prop, disabled }: { clip: Clip; prop: AnimProp; disab
       }`}
     >
       <Diamond size={12} fill={onKey ? 'currentColor' : 'none'} strokeWidth={2.2} />
+    </button>
+      {frames && <GraphToggle clipId={clip.id} prop={prop} />}
+    </span>
+  )
+}
+
+/** Show / hide an animated property's curve in the graph editor. */
+function GraphToggle({ clipId, prop }: { clipId: string; prop: AnimProp }) {
+  const hidden = useEditor((s) => !!s.graphHidden[`${clipId}:${prop}`])
+  const label = hidden ? 'Show this curve in the graph editor' : 'Hide this curve from the graph editor'
+  return (
+    <button
+      type="button"
+      onClick={() => useEditor.getState().setGraphHidden(clipId, prop, !hidden)}
+      title={label}
+      aria-label={label}
+      aria-pressed={!hidden}
+      className={`flex h-7 w-5 shrink-0 items-center justify-center rounded transition-colors ${
+        hidden ? 'text-faint/60 hover:text-muted' : 'text-accent-2 hover:text-fg'
+      }`}
+    >
+      <ChartSpline size={11} strokeWidth={hidden ? 1.6 : 2.2} />
     </button>
   )
 }
