@@ -8,6 +8,7 @@ import {
   ChartSpline,
   ArrowRightLeft,
   Eye,
+  FlagTriangleRight,
   Link2,
   Unlink2,
   EyeOff,
@@ -196,13 +197,16 @@ export function Timeline({ projectId }: { projectId: string }) {
   )
 
   // ---- snapping ---------------------------------------------------------------------
-  const snapTargets = useCallback((exclude: Set<string>) => {
+  /** Snap points: timeline start/end, clip edges, markers (if enabled) and,
+   * unless we're moving the playhead itself, the playhead. */
+  const snapTargets = useCallback((exclude: Set<string>, withPlayhead = true) => {
     const s = useEditor.getState()
-    const pts = [0, s.playhead]
+    const pts = [0, docDuration(s.doc)]
+    if (withPlayhead) pts.push(s.playhead)
     for (const c of s.doc.clips) {
       if (exclude.has(c.id)) continue
       pts.push(c.start, clipEnd(c))
-      for (const m of visibleMarkers(c)) pts.push(c.start + m.t)
+      if (s.snapMarkers) for (const m of visibleMarkers(c)) pts.push(c.start + m.t)
     }
     return pts
   }, [])
@@ -401,12 +405,28 @@ export function Timeline({ projectId }: { projectId: string }) {
     }
   }
 
+  /** Move the playhead to a pointer position: snapped to clip edges / markers
+   * (unless Alt or snapping is off), otherwise to the nearest frame. */
+  const seekTo = useCallback(
+    (clientX: number, noSnap: boolean) => {
+      const s = useEditor.getState()
+      const fps = s.doc.settings.fps
+      let t = timeAt(clientX)
+      const sn = noSnap ? { delta: 0, at: null } : snap([t], snapTargets(new Set(), false))
+      if (sn.at !== null) t = sn.at
+      else t = Math.round(t * fps) / fps
+      setSnapLine(sn.at)
+      s.setPlayhead(Math.max(0, t))
+    },
+    [timeAt, snap, snapTargets],
+  )
+
   const scrub = (e: React.PointerEvent) => {
     if (e.button !== 0) return
-    const s = useEditor.getState()
-    s.setPlayhead(timeAt(e.clientX))
-    const move = (ev: PointerEvent) => useEditor.getState().setPlayhead(timeAt(ev.clientX))
+    seekTo(e.clientX, e.altKey)
+    const move = (ev: PointerEvent) => seekTo(ev.clientX, ev.altKey)
     const up = () => {
+      setSnapLine(null)
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
     }
@@ -458,7 +478,8 @@ export function Timeline({ projectId }: { projectId: string }) {
       if (!active) {
         const st = useEditor.getState()
         if (!ev.shiftKey) st.select([])
-        st.setPlayhead(timeAt(ev.clientX))
+        seekTo(ev.clientX, ev.altKey)
+        setSnapLine(null)
       }
     }
     window.addEventListener('pointermove', move)
@@ -466,9 +487,9 @@ export function Timeline({ projectId }: { projectId: string }) {
   }
   const onLaneClick = (e: React.MouseEvent) => {
     if (lastLanePointer.current === 'mouse' || e.target !== e.currentTarget) return
-    const s = useEditor.getState()
-    s.select([])
-    s.setPlayhead(timeAt(e.clientX))
+    useEditor.getState().select([])
+    seekTo(e.clientX, false)
+    setSnapLine(null)
   }
 
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
@@ -803,6 +824,7 @@ function TrackHeader({
 function Toolbar({ compact }: { compact: boolean }) {
   const zoom = useEditor((s) => s.zoom)
   const snapping = useEditor((s) => s.snapping)
+  const snapMarkers = useEditor((s) => s.snapMarkers)
   const hasSelection = useEditor((s) => s.selection.length > 0)
   const canLink = useEditor((s) => s.selection.length > 1)
   const canUnlink = useEditor((s) => s.doc.clips.some((c) => c.link && s.selection.includes(c.id)))
@@ -865,8 +887,20 @@ function Toolbar({ compact }: { compact: boolean }) {
       <IconButton label="Graph editor (G)" active={graphOpen} onClick={() => s.setGraphOpen(!graphOpen)}>
         <ChartSpline size={15} />
       </IconButton>
-      <IconButton label={snapping ? 'Snapping on' : 'Snapping off'} active={snapping} onClick={() => s.setSnapping(!snapping)}>
+      <IconButton
+        label={snapping ? 'Snapping on (hold Alt to skip)' : 'Snapping off'}
+        active={snapping}
+        onClick={() => s.setSnapping(!snapping)}
+      >
         <Magnet size={15} />
+      </IconButton>
+      <IconButton
+        label={snapMarkers ? 'Snap to markers: on' : 'Snap to markers: off'}
+        active={snapMarkers && snapping}
+        disabled={!snapping}
+        onClick={() => s.setSnapMarkers(!snapMarkers)}
+      >
+        <FlagTriangleRight size={15} />
       </IconButton>
       <div className="mx-1 h-5 w-px bg-line" />
       <IconButton label="Zoom out (−)" onClick={() => s.setZoom(zoom / 1.25)}>
@@ -1180,7 +1214,19 @@ function ClipMarkers({ clip, zoom, locked, compact }: { clip: Clip; zoom: number
       const fps = st.doc.settings.fps
       const cur = st.doc.clips.find((c) => c.id === clip.id)
       if (!cur) return
-      const t = clamp(Math.round((t0 + dx / st.zoom) * fps) / fps, 0, cur.duration)
+      let t = Math.round((t0 + dx / st.zoom) * fps) / fps
+      if (st.snapping && !ev.altKey) {
+        // Snap to clip edges and (if enabled) other markers on the timeline.
+        const pts: number[] = []
+        for (const c of st.doc.clips) {
+          pts.push(c.start - cur.start, clipEnd(c) - cur.start)
+          if (st.snapMarkers) for (const m of visibleMarkers(c)) if (m.id !== markerId) pts.push(c.start + m.t - cur.start)
+        }
+        const tol = SNAP_PX / st.zoom
+        const hit = pts.reduce<number | null>((best, p) => (Math.abs(p - t) < tol && (best === null || Math.abs(p - t) < Math.abs(best - t)) ? p : best), null)
+        if (hit !== null) t = hit
+      }
+      t = clamp(t, 0, cur.duration)
       st.updateMarker(clip.id, markerId, { t })
       st.setPlayhead(cur.start + t)
     }

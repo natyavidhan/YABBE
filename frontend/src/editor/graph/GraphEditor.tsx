@@ -691,10 +691,13 @@ function GraphInner({ clip, compact, onClose }: { clip: Clip; compact: boolean; 
         })
       }
       // Snap the grabbed key to the playhead or a marker (unless Alt).
-      if (!e.altKey && dx !== 0) {
+      if (!e.altKey && dx !== 0 && store().snapping) {
         const grabbed = d.orig.get(d.hit.prop)![d.hit.i]
         const st = store()
-        const targets = [st.playhead - clip.start, ...allMarkers(st.doc).map((m) => m.time - clip.start)]
+        const targets = [
+          st.playhead - clip.start,
+          ...(st.snapMarkers ? allMarkers(st.doc).map((m) => m.time - clip.start) : []),
+        ]
         const tol = (8 / L.plotW) * (L.v.t1 - L.v.t0)
         for (const t of targets) {
           if (Math.abs(grabbed.t + dt - t) < tol) {

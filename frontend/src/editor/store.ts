@@ -18,6 +18,23 @@ export interface GraphKey {
   i: number
 }
 
+// Snapping preferences (this browser).
+function loadSnap(): { snapping: boolean; markers: boolean } {
+  try {
+    const v = JSON.parse(localStorage.getItem('yabbe.snap') ?? '{}')
+    return { snapping: v.snapping !== false, markers: v.markers !== false }
+  } catch {
+    return { snapping: true, markers: true }
+  }
+}
+function saveSnap(v: { snapping: boolean; markers: boolean }) {
+  try {
+    localStorage.setItem('yabbe.snap', JSON.stringify(v))
+  } catch {
+    /* ignore */
+  }
+}
+
 const graphHiddenKey = (projectId: string) => `yabbe.graphHidden.${projectId}`
 const collapsedKey = (projectId: string) => `yabbe.collapsed.${projectId}`
 
@@ -85,6 +102,8 @@ interface EditorState {
   playing: boolean
   zoom: number // px per second
   snapping: boolean
+  /** Also snap to markers (only while snapping is on). */
+  snapMarkers: boolean
   uploads: Upload[]
   textSizes: Record<string, { width: number; height: number }>
 
@@ -125,6 +144,7 @@ interface EditorState {
   setPlaying: (p: boolean) => void
   setZoom: (z: number) => void
   setSnapping: (s: boolean) => void
+  setSnapMarkers: (s: boolean) => void
   setUploads: (fn: (u: Upload[]) => Upload[]) => void
   setTextSize: (key: string, size: { width: number; height: number }) => void
 
@@ -331,7 +351,8 @@ export const useEditor = create<EditorState>((set, get) => {
     playhead: 0,
     playing: false,
     zoom: 60,
-    snapping: true,
+    snapping: loadSnap().snapping,
+    snapMarkers: loadSnap().markers,
     uploads: [],
     textSizes: {},
     graphOpen: false,
@@ -457,7 +478,14 @@ export const useEditor = create<EditorState>((set, get) => {
     setPlayhead: (t) => set({ playhead: Math.max(0, t) }),
     setPlaying: (playing) => set({ playing }),
     setZoom: (z) => set({ zoom: clamp(z, 4, 800) }),
-    setSnapping: (snapping) => set({ snapping }),
+    setSnapping: (snapping) => {
+      set({ snapping })
+      saveSnap({ snapping, markers: get().snapMarkers })
+    },
+    setSnapMarkers: (snapMarkers) => {
+      set({ snapMarkers })
+      saveSnap({ snapping: get().snapping, markers: snapMarkers })
+    },
     setUploads: (fn) => set({ uploads: fn(get().uploads) }),
     setTextSize: (key, size) => set({ textSizes: { ...get().textSizes, [key]: size } }),
 
