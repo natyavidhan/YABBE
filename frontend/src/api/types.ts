@@ -130,6 +130,26 @@ export interface Marker {
   color: string
 }
 
+/** Transition into the next clip that touches this one (centred on the cut). */
+export interface Transition {
+  kind: string
+  duration: number
+}
+
+export interface TransitionInfo {
+  id: string
+  name: string
+  category: string
+}
+
+export interface TransitionCatalog {
+  categories: string[]
+  transitions: TransitionInfo[]
+  default_duration: number
+  min_duration: number
+  max_duration: number
+}
+
 export interface Clip {
   id: string
   track_id: string
@@ -148,6 +168,7 @@ export interface Clip {
   text: TextStyle | null
   keyframes: Partial<Record<AnimProp, Keyframe[]>>
   markers: Marker[]
+  transition?: Transition | null
 }
 
 export interface Project {

@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AnimProp, Asset, Clip, ClipType, Ease, Keyframe, Marker, Project, ProjectSettings, TextStyle, Timeline, Track, TrackKind } from '../api/types'
+import type { AnimProp, Asset, Clip, ClipType, Ease, Keyframe, Marker, Transition, Project, ProjectSettings, TextStyle, Timeline, Track, TrackKind } from '../api/types'
 import { clamp, uid } from '../lib/format'
 import { recalcAuto } from './graph/model'
 import { colorPropAt, shiftMarkers, visibleMarkers, framesOf, isColorProp, keyIndexAt, localTime, propAt, shiftKeyframes, staticColor, staticValue, TEXT_COLOR, TEXT_NUMERIC, upsertKey } from './keyframes'
@@ -77,6 +77,10 @@ interface EditorState {
   /** `${clipId}:${prop}` -> hidden from the graph editor. */
   graphHidden: Record<string, boolean>
   graphSel: GraphKey[]
+  /** Selected transition, identified by the clip it leaves (clip A). */
+  transSel: string | null
+  selectTransition: (clipId: string | null) => void
+  setTransition: (clipId: string, t: Transition | null) => void
   setGraphOpen: (open: boolean) => void
   setGraphHidden: (clipId: string, prop: AnimProp, hidden: boolean) => void
   setGraphSel: (sel: GraphKey[]) => void
@@ -257,6 +261,7 @@ function makeClip(partial: Partial<Clip> & Pick<Clip, 'track_id' | 'type'>): Cli
     text: null,
     keyframes: {},
     markers: [],
+    transition: null,
     ...partial,
   }
 }
@@ -308,6 +313,11 @@ export const useEditor = create<EditorState>((set, get) => {
     graphOpen: false,
     graphHidden: {},
     graphSel: [],
+    transSel: null,
+
+    selectTransition: (clipId) => set(clipId ? { transSel: clipId, selection: [], graphSel: [] } : { transSel: null }),
+    setTransition: (clipId, t) =>
+      setClips((clips) => clips.map((c) => (c.id === clipId ? { ...c, transition: t } : c))),
 
     setGraphOpen: (graphOpen) => set({ graphOpen }),
     setGraphHidden: (clipId, prop, hidden) => {
@@ -396,7 +406,7 @@ export const useEditor = create<EditorState>((set, get) => {
 
     select: (ids) => {
       const same = ids.length === get().selection.length && ids.every((id, i) => id === get().selection[i])
-      set(same ? { selection: ids } : { selection: ids, graphSel: [] })
+      set(same ? { selection: ids, transSel: ids.length ? null : get().transSel } : { selection: ids, graphSel: [], transSel: null })
     },
     toggleSelect: (id) => {
       const sel = get().selection
@@ -596,7 +606,7 @@ export const useEditor = create<EditorState>((set, get) => {
           if (!ids.has(c.id)) return [c]
           const left = t - c.start
           const inFirst = (m: Marker) => m.t < left - 1e-6
-          const a: Clip = { ...c, duration: left, fade_out: 0, markers: (c.markers ?? []).filter(inFirst) }
+          const a: Clip = { ...c, duration: left, fade_out: 0, markers: (c.markers ?? []).filter(inFirst), transition: null }
           const b: Clip = {
             ...c,
             id: uid('c_'),
@@ -686,6 +696,30 @@ export const useEditor = create<EditorState>((set, get) => {
     },
   }
 })
+
+/** Pairs of touching visual clips on the same track (where transitions can go). */
+export function cuts(doc: Doc): { a: Clip; b: Clip; time: number }[] {
+  const fps = doc.settings.fps
+  const videoTracks = new Set(doc.tracks.filter((t) => t.kind === 'video').map((t) => t.id))
+  const byTrack = new Map<string, Clip[]>()
+  for (const c of doc.clips) {
+    if (c.type === 'audio' || !videoTracks.has(c.track_id)) continue
+    byTrack.set(c.track_id, [...(byTrack.get(c.track_id) ?? []), c])
+  }
+  const out: { a: Clip; b: Clip; time: number }[] = []
+  for (const list of byTrack.values()) {
+    list.sort((x, y) => x.start - y.start)
+    for (let i = 0; i + 1 < list.length; i++) {
+      const a = list[i]
+      const b = list[i + 1]
+      if (Math.abs(b.start - clipEnd(a)) <= 0.5 / fps) out.push({ a, b, time: clipEnd(a) })
+    }
+  }
+  return out
+}
+
+/** Effective transition length (never longer than either clip). */
+export const transitionLength = (a: Clip, b: Clip) => Math.min(a.transition?.duration ?? 0, a.duration, b.duration)
 
 /** Every visible marker on the timeline, in time order. */
 export function allMarkers(doc: Doc) {

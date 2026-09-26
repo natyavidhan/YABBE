@@ -141,7 +141,10 @@ export function useShortcuts() {
       else if (mod) handled = false
       else if (e.key === ' ') s.setPlaying(!s.playing)
       else if (key === 's') s.splitAtPlayhead()
-      else if (e.key === 'Delete' || e.key === 'Backspace') s.deleteSelected()
+      else if ((e.key === 'Delete' || e.key === 'Backspace') && s.transSel) {
+        s.setTransition(s.transSel, null)
+        s.selectTransition(null)
+      } else if (e.key === 'Delete' || e.key === 'Backspace') s.deleteSelected()
       else if (e.key === 'Escape') s.select([])
       else if (e.key === 'ArrowLeft') {
         s.setPlaying(false)

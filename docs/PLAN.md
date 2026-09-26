@@ -118,9 +118,12 @@ Ops
       families, back/elastic/bounce, saved curves), F9 shortcuts, box select,
       copy/paste, stretch, snapping; per-property show-in-graph toggles;
       desktop side panel / phone takeover
+- [x] Transitions: 74 CapCut-style transitions (xfade modes + per-frame
+      motion recipes) between touching clips, centred on the cut, animated
+      previews, apply to all cuts
 - [x] Motion path on the preview: per-frame dots, draggable position keys,
       click to seek, double-click to add keys, toggle
 
 ## Later
-Transitions, keyframable crop/colour, effects/filters (colour, blur), audio ducking, captions
+Audio crossfades for transitions, keyframable crop/colour, effects/filters (colour, blur), audio ducking, captions
 import (SRT), render queue across projects, WebSocket push instead of polling.

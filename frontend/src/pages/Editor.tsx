@@ -234,8 +234,13 @@ function MobileEditor({
 }) {
   const [sheet, setSheet] = useState<SheetKind>(null)
   const selected = useEditor((s) => s.selection.length)
+  const transSel = useEditor((s) => s.transSel)
   const graphOpen = useEditor((s) => s.graphOpen)
   const closeGraph = () => useEditor.getState().setGraphOpen(false)
+  // Tapping a cut's + (or a transition) opens its settings straight away.
+  useEffect(() => {
+    if (transSel) setSheet('edit')
+  }, [transSel])
   const timelineArea = graphOpen ? <GraphEditor compact onClose={closeGraph} /> : <Timeline projectId={projectId} />
   // Landscape phones: preview and timeline side by side, panels slide over the timeline.
   const landscape = useMediaQuery('(orientation: landscape)')
@@ -257,9 +262,9 @@ function MobileEditor({
       />
       <TabButton
         icon={<SlidersHorizontal size={18} />}
-        label={selected ? 'Edit clip' : 'Project'}
+        label={transSel ? 'Transition' : selected ? 'Edit clip' : 'Project'}
         compact={landscape}
-        badge={selected > 0}
+        badge={selected > 0 || !!transSel}
         active={sheet === 'edit'}
         onClick={() => setSheet(sheet === 'edit' ? null : 'edit')}
       />
@@ -321,7 +326,7 @@ function MobileEditor({
         >
           <div className="flex items-center justify-between border-b border-line px-3 py-1.5">
             <span className="text-xs font-semibold tracking-wide text-muted uppercase">
-              {sheet === 'media' ? 'Media' : selected ? 'Clip properties' : 'Project'}
+              {sheet === 'media' ? 'Media' : transSel ? 'Transition' : selected ? 'Clip properties' : 'Project'}
             </span>
             <IconButton label="Close panel" onClick={() => setSheet(null)} className="h-8! w-8!">
               <X size={18} />

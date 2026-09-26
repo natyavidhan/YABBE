@@ -9,6 +9,7 @@ import type {
   Quality,
   TextStyle,
   Timeline,
+  TransitionCatalog,
 } from './types'
 
 export class ApiError extends Error {
@@ -120,6 +121,10 @@ export const api = {
   listJobs: (projectId?: string) =>
     request<Job[]>('GET', `/api/jobs${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`),
   cancelJob: (jobId: string) => request<{ ok: boolean }>('POST', `/api/jobs/${jobId}/cancel`),
+
+  // transitions
+  transitions: () => request<TransitionCatalog>('GET', '/api/transitions'),
+  transitionPreviewUrl: (kind: string) => `/api/transitions/${encodeURIComponent(kind)}/preview.webp`,
 
   // text
   fonts: () => request<string[]>('GET', '/api/fonts'),

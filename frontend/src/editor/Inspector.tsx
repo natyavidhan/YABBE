@@ -35,9 +35,16 @@ import { toast } from '../components/toast'
 import { fillScale, sourceSize } from './geometry'
 import { allKeyTimes, EASES, framesOf, keyIndexAt, localTime, MARKER_COLORS, propAt, textStyleAt, visibleMarkers } from './keyframes'
 import { ProjectSettingsForm } from './ProjectSettings'
+import { TransitionPanel } from './TransitionPanel'
 import { clipEnd, gapAfter, MAX_SPEED, maxClipDuration, MIN_CLIP, MIN_SPEED, overlaps, speedRange, useEditor, type ClipPatch } from './store'
 
 export function Inspector() {
+  const transSel = useEditor((s) => s.transSel)
+  if (transSel) return <TransitionPanel clipId={transSel} />
+  return <ClipOrProjectInspector />
+}
+
+function ClipOrProjectInspector() {
   const selection = useEditor((s) => s.selection)
   const clip = useEditor((s) => (s.selection.length === 1 ? s.doc.clips.find((c) => c.id === s.selection[0]) : undefined))
   const asset = useEditor((s) => (clip?.asset_id ? s.assets.find((a) => a.id === clip.asset_id) : undefined))

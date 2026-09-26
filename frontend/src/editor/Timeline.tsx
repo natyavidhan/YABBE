@@ -3,6 +3,7 @@ import {
   ChevronUp,
   Copy,
   ChartSpline,
+  ArrowRightLeft,
   Eye,
   EyeOff,
   Flag,
@@ -27,7 +28,8 @@ import { clamp } from '../lib/format'
 import { isTouchEvent, useIsMobile } from '../lib/useMedia'
 import { allKeyTimes, shiftKeyframes, shiftMarkers, visibleMarkers } from './keyframes'
 import { ASSET_MIME } from './MediaBin'
-import { allMarkers, clipEnd, docDuration, maxClipDuration, MIN_CLIP, overlaps, useEditor } from './store'
+import { allMarkers, clipEnd, cuts, docDuration, maxClipDuration, MIN_CLIP, overlaps, transitionLength, useEditor } from './store'
+import { useTransitionCatalog } from './transitionCatalog'
 
 const HEADER_W = 176
 const HEADER_W_COMPACT = 104
@@ -53,7 +55,12 @@ export function Timeline({ projectId }: { projectId: string }) {
   const zoom = useEditor((s) => s.zoom)
   const assets = useEditor((s) => s.assets)
   const selection = useEditor((s) => s.selection)
+  const transSel = useEditor((s) => s.transSel)
   const duration = useEditor((s) => docDuration(s.doc))
+  const doc = useEditor((s) => s.doc)
+  const cutList = useMemo(() => cuts(doc), [doc])
+  const catalog = useTransitionCatalog()
+  const transName = (kind: string) => catalog?.transitions.find((t) => t.id === kind)?.name ?? kind
   const scrollRef = useRef<HTMLDivElement>(null)
   const lanesRef = useRef<HTMLDivElement>(null)
   const [view, setView] = useState({ left: 0, width: 1000 })
@@ -433,7 +440,7 @@ export function Timeline({ projectId }: { projectId: string }) {
               <div key={track.id} className="flex" style={{ height: TRACK_H[track.kind] }}>
                 <TrackHeader track={track} index={i} count={tracks.length} width={headerW} compact={compact} />
                 <div
-                  className={`relative flex-1 border-b border-line ${track.kind === 'audio' ? 'bg-[#13161b]' : 'bg-bg'} ${
+                  className={`group/lane relative flex-1 border-b border-line ${track.kind === 'audio' ? 'bg-[#13161b]' : 'bg-bg'} ${
                     track.hidden || track.muted ? 'opacity-50' : ''
                   }`}
                   onPointerDown={onLaneDown}
@@ -460,6 +467,21 @@ export function Timeline({ projectId }: { projectId: string }) {
                         locked={track.locked}
                         onDown={onClipDown}
                         compact={compact}
+                      />
+                    ))}
+                  {cutList
+                    .filter((c) => c.a.track_id === track.id && c.time >= visible.from && c.time <= visible.to)
+                    .map((c) => (
+                      <CutMarker
+                        key={`${c.a.id}-${c.b.id}`}
+                        cut={c}
+                        zoom={zoom}
+                        height={TRACK_H[track.kind]}
+                        selected={transSel === c.a.id}
+                        near={selection.includes(c.a.id) || selection.includes(c.b.id)}
+                        locked={track.locked}
+                        compact={compact}
+                        name={c.a.transition ? transName(c.a.transition.kind) : ''}
                       />
                     ))}
                 </div>
@@ -861,6 +883,78 @@ const TimelineClip = memo(function TimelineClip({
     </div>
   )
 })
+
+/** A cut between two touching clips: add a transition (+) or show the existing one. */
+function CutMarker({
+  cut,
+  zoom,
+  height,
+  selected,
+  near,
+  locked,
+  compact,
+  name,
+}: {
+  cut: { a: Clip; b: Clip; time: number }
+  zoom: number
+  height: number
+  selected: boolean
+  near: boolean
+  locked: boolean
+  compact: boolean
+  name: string
+}) {
+  const s = useEditor.getState()
+  const t = cut.a.transition
+  if (t) {
+    const d = transitionLength(cut.a, cut.b)
+    const w = Math.max(compact ? 24 : 18, d * zoom)
+    return (
+      <button
+        type="button"
+        title={`${name} · ${d.toFixed(2)} s — click to edit`}
+        aria-label={`Transition ${name}`}
+        onPointerDown={(e) => {
+          e.stopPropagation()
+          s.selectTransition(cut.a.id)
+        }}
+        className={`absolute top-1/2 z-[6] flex -translate-y-1/2 items-center justify-center overflow-hidden rounded-md border text-white shadow-md shadow-black/40 ${
+          selected ? 'border-white ring-2 ring-white/80' : 'border-black/40'
+        }`}
+        style={{
+          left: cut.time * zoom - w / 2,
+          width: w,
+          height: Math.min(height - 12, compact ? 34 : 28),
+          background: 'repeating-linear-gradient(135deg, #7c5cff 0 6px, #6246e0 6px 12px)',
+          touchAction: 'none',
+        }}
+      >
+        <ArrowRightLeft size={12} />
+      </button>
+    )
+  }
+  if (locked) return null
+  const size = compact ? 26 : 18
+  return (
+    <button
+      type="button"
+      title="Add a transition"
+      aria-label="Add a transition"
+      onPointerDown={(e) => {
+        e.stopPropagation()
+        const st = useEditor.getState()
+        st.setTransition(cut.a.id, { kind: 'mix', duration: Math.min(0.5, cut.a.duration, cut.b.duration) })
+        st.selectTransition(cut.a.id)
+      }}
+      className={`absolute top-1/2 z-[6] flex -translate-y-1/2 items-center justify-center rounded-full border border-white/70 bg-accent text-white shadow-md shadow-black/50 transition-opacity ${
+        near ? 'opacity-100' : 'opacity-0 group-hover/lane:opacity-100'
+      }`}
+      style={{ left: cut.time * zoom - size / 2, width: size, height: size, touchAction: 'none' }}
+    >
+      <Plus size={compact ? 14 : 11} />
+    </button>
+  )
+}
 
 /** Marker lines on a clip; drag a flag to move it, click to jump there. */
 function ClipMarkers({ clip, zoom, locked, compact }: { clip: Clip; zoom: number; locked: boolean; compact: boolean }) {

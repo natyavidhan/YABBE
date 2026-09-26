@@ -75,6 +75,16 @@ videos can be uploaded.
   to move that position key (Shift locks the direction), click the path to
   jump to that moment, double-click it to add a position key. Toggle it with
   the route button next to the play controls.
+* **Transitions** — 74 transitions in CapCut's categories: Basic (mix,
+  dissolve, black/white/monochrome fades), Camera (pull in/out, zoom in, spin,
+  swing, shake, swipes), Slide (slide/cover/reveal ×4, squeeze), Wipe (wipes,
+  soft wipes, corner and diagonal wipes, clock), Mask (circle, rectangle,
+  split open/close, blinds), Blur (blur, motion blur, zoom blur), Glitch
+  (glitch, RGB split, mosaic), Light (flash, flash zoom) and Distortion (morph,
+  wind). Hover a cut between two touching clips and press **+**; pick from
+  animated previews, set the duration, apply to all cuts. Transitions are
+  centred on the cut and use footage beyond the clip edges when it exists
+  (otherwise the edge frame is held), so the timeline doesn't shift.
 * **Speed** — 0.25×–4× with a hold-to-repeat stepper and presets; the clip
   resizes on the timeline as you change it, or type a length in **Fit to**
   and the speed is chosen so the same footage plays in exactly that time.
