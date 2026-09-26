@@ -29,6 +29,7 @@ Or with Compose, using the [`docker-compose.yml`](docker-compose.yml) in this re
 ```bash
 docker compose up -d            # pulls the published image
 docker compose up -d --build    # or build from this checkout
+YABBE_PORT=9000 docker compose up -d   # use another host port
 ```
 
 **Data** — everything (projects, uploads, caches, exports) lives in the `/data`

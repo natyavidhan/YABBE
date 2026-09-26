@@ -6,7 +6,7 @@ services:
     build: .
     container_name: yabbe
     ports:
-      - "8000:8000"
+      - "${YABBE_PORT:-8000}:8000"   # host port: YABBE_PORT=9000 docker compose up -d
     volumes:
       # Projects, uploads, caches and exports. To use a host folder instead:
       #   - ./data:/data   (and set PUID/PGID to your `id -u` / `id -g`)
