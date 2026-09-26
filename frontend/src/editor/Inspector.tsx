@@ -6,6 +6,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Diamond,
+  Gauge,
+  Minus,
+  Plus,
   Crop as CropIcon,
   FlipHorizontal2,
   FlipVertical2,
@@ -20,7 +23,7 @@ import {
   Volume2,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api } from '../api/client'
 import type { AnimProp, Asset, Clip, Ease } from '../api/types'
 import { IconButton, inputClass, NumberInput } from '../components/ui'
@@ -28,7 +31,7 @@ import { formatDuration } from '../lib/format'
 import { fillScale, sourceSize } from './geometry'
 import { allKeyTimes, EASES, framesOf, keyIndexAt, localTime, propAt, textStyleAt } from './keyframes'
 import { ProjectSettingsForm } from './ProjectSettings'
-import { clipEnd, maxClipDuration, MIN_CLIP, overlaps, useEditor, type ClipPatch } from './store'
+import { clipEnd, gapAfter, MAX_SPEED, maxClipDuration, MIN_CLIP, MIN_SPEED, overlaps, speedRange, useEditor, type ClipPatch } from './store'
 
 export function Inspector() {
   const selection = useEditor((s) => s.selection)
@@ -208,20 +211,12 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
   // Changing duration/speed must not overlap the next clip or exceed the source.
   const setDuration = (d: number) => {
     const s = useEditor.getState()
-    const max = Math.min(maxClipDuration(clip, asset), nextGap(s.doc.clips, clip))
+    const max = Math.min(maxClipDuration(clip, asset), gapAfter(s.doc.clips, clip))
     set({ duration: Math.max(MIN_CLIP, Math.min(d, max)) })
   }
   const setStart = (start: number) => {
     const s = useEditor.getState()
     if (!overlaps(s.doc.clips, clip.track_id, start, clip.duration, new Set([clip.id]))) set({ start: Math.max(0, start) })
-  }
-  const setSpeed = (speed: number) => {
-    // Keep the same source range: timeline duration scales inversely.
-    const srcLen = clip.duration * clip.speed
-    let duration = srcLen / speed
-    const s = useEditor.getState()
-    duration = Math.min(duration, nextGap(s.doc.clips, clip))
-    set({ speed, duration: Math.max(MIN_CLIP, duration) })
   }
 
   return (
@@ -258,7 +253,6 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
                 {...scrub}
                 scrubScale={0.2}
               />
-              <NumberInput label="Speed" value={clip.speed} onChange={setSpeed} step={0.05} min={0.25} max={4} precision={2} suffix="×" {...scrub} scrubScale={0.2} />
             </>
           )}
         </div>
@@ -268,6 +262,8 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
           </p>
         )}
       </Section>
+
+      {(clip.type === 'video' || clip.type === 'audio') && <SpeedSection clip={clip} locked={locked} />}
 
       {visual && (
         <Section
@@ -515,11 +511,171 @@ function KeyframeBar({ clip, disabled }: { clip: Clip; disabled?: boolean }) {
   )
 }
 
-function nextGap(clips: Clip[], clip: Clip) {
-  const next = clips
-    .filter((c) => c.track_id === clip.track_id && c.id !== clip.id && c.start >= clipEnd(clip) - 1e-6)
-    .reduce((m, c) => Math.min(m, c.start), Infinity)
-  return next - clip.start
+const SPEED_PRESETS = [0.5, 1, 1.5, 2]
+
+/** Press-and-hold repeat for stepper buttons (one undo step per hold). */
+function useHoldRepeat() {
+  const timer = useRef<number | undefined>(undefined)
+  const stop = () => {
+    window.clearTimeout(timer.current)
+    window.clearInterval(timer.current)
+    timer.current = undefined
+    useEditor.getState().endGesture()
+  }
+  useEffect(() => stop, [])
+  const start = (fn: () => void) => {
+    useEditor.getState().beginGesture()
+    fn()
+    timer.current = window.setTimeout(() => {
+      timer.current = window.setInterval(fn, 70)
+    }, 380)
+  }
+  return { start, stop }
+}
+
+/** Speed stepper + "fit to duration": retimes the same footage. */
+function SpeedSection({ clip, locked }: { clip: Clip; locked: boolean }) {
+  const clips = useEditor((s) => s.doc.clips)
+  const { fitClipDuration } = useEditor.getState()
+  const [draft, setDraft] = useState<string | null>(null)
+  const [note, setNote] = useState<string | null>(null)
+  const hold = useHoldRepeat()
+  const range = speedRange(clips, clip)
+  const footage = clip.duration * clip.speed
+  const gap = gapAfter(clips, clip)
+
+  const apply = (wanted: number) => {
+    if (locked) return clip.speed
+    const got = useEditor.getState().setClipSpeed(clip.id, wanted)
+    setNote(
+      wanted < got - 1e-6 && range.limitedByNext
+        ? `The next clip starts ${gap.toFixed(2)} s after this one, so ${got.toFixed(2)}× is the slowest that fits.`
+        : wanted > got + 1e-6 || wanted < got - 1e-6
+          ? `Speed is limited to ${MIN_SPEED}×–${MAX_SPEED}×.`
+          : null,
+    )
+    return got
+  }
+  // Step from the *current* value in the store (holds read it every tick).
+  const step = (dir: 1 | -1, big: boolean) => {
+    const cur = useEditor.getState().doc.clips.find((c) => c.id === clip.id)?.speed ?? clip.speed
+    const inc = big ? 0.25 : 0.05
+    apply(Math.round((cur + dir * inc) / inc) * inc)
+  }
+  const commitDraft = () => {
+    if (draft === null) return
+    const v = parseFloat(draft)
+    if (!Number.isNaN(v) && v > 0) apply(v)
+    setDraft(null)
+  }
+
+  const stepButton = (dir: 1 | -1) => (
+    <button
+      type="button"
+      disabled={locked || (dir < 0 ? clip.speed <= range.min + 1e-6 : clip.speed >= range.max - 1e-6)}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        e.preventDefault()
+        const big = e.shiftKey
+        hold.start(() => step(dir, big))
+      }}
+      onPointerUp={hold.stop}
+      onPointerLeave={hold.stop}
+      onPointerCancel={hold.stop}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          step(dir, e.shiftKey)
+        }
+      }}
+      aria-label={dir > 0 ? 'Faster' : 'Slower'}
+      title={`${dir > 0 ? 'Faster' : 'Slower'} (hold to repeat, Shift for bigger steps)`}
+      className="flex h-full w-8 shrink-0 touch-none items-center justify-center text-muted transition-colors hover:bg-raised hover:text-fg disabled:opacity-30 pointer-coarse:w-10"
+    >
+      {dir > 0 ? <Plus size={14} /> : <Minus size={14} />}
+    </button>
+  )
+
+  return (
+    <Section icon={<Gauge size={14} />} title="Speed" onReset={() => apply(1)}>
+      <div className="flex items-center gap-2">
+        <div className="flex h-8 flex-1 items-stretch overflow-hidden rounded-md border border-line bg-bg focus-within:border-accent">
+          {stepButton(-1)}
+          <input
+            className="tabular w-full min-w-0 border-x border-line bg-transparent text-center text-sm font-medium outline-none"
+            value={draft ?? `${Number(clip.speed.toFixed(2))}×`}
+            inputMode="decimal"
+            aria-label="Speed"
+            disabled={locked}
+            onFocus={(e) => {
+              setDraft(String(Number(clip.speed.toFixed(3))))
+              requestAnimationFrame(() => e.target.select())
+            }}
+            onChange={(e) => setDraft(e.target.value.replace('×', ''))}
+            onBlur={commitDraft}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+              else if (e.key === 'Escape') {
+                setDraft(null)
+                ;(e.target as HTMLInputElement).blur()
+              } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                e.preventDefault()
+                step(e.key === 'ArrowUp' ? 1 : -1, e.shiftKey)
+                setDraft(null)
+              }
+            }}
+            onWheel={(e) => {
+              if (document.activeElement !== e.currentTarget) return
+              step(e.deltaY < 0 ? 1 : -1, e.shiftKey)
+              setDraft(null)
+            }}
+          />
+          {stepButton(1)}
+        </div>
+      </div>
+      <div className="flex gap-1">
+        {SPEED_PRESETS.map((p) => (
+          <button
+            key={p}
+            disabled={locked || p < range.min - 1e-6 || p > range.max + 1e-6}
+            onClick={() => apply(p)}
+            className={`h-7 flex-1 rounded-md border text-xs transition-colors disabled:opacity-30 ${
+              Math.abs(clip.speed - p) < 1e-6 ? 'border-accent bg-accent/15 text-fg' : 'border-line text-muted hover:border-line-strong'
+            }`}
+          >
+            {p}×
+          </button>
+        ))}
+      </div>
+      <Row label="Fit to">
+        <NumberInput
+          value={clip.duration}
+          onChange={(seconds) => {
+            if (locked) return
+            const got = fitClipDuration(clip.id, seconds)
+            const lasts = footage / got
+            setNote(
+              Math.abs(lasts - seconds) > 0.01
+                ? `Couldn't fit ${seconds.toFixed(2)} s — at ${got.toFixed(2)}× it plays for ${lasts.toFixed(2)} s${
+                    got === range.min && range.limitedByNext ? ' (the next clip is in the way)' : ''
+                  }.`
+                : null,
+            )
+          }}
+          step={0.1}
+          min={0.01}
+          precision={2}
+          suffix="s"
+        />
+      </Row>
+      <p className="tabular text-[11px] leading-relaxed text-faint">
+        {footage.toFixed(2)} s of footage plays for <span className="text-fg">{clip.duration.toFixed(2)} s</span> at{' '}
+        {Number(clip.speed.toFixed(2))}×.
+        {range.limitedByNext && ` Slowest that fits before the next clip: ${range.min.toFixed(2)}×.`}
+      </p>
+      {note && <p className="rounded bg-warn/10 px-2 py-1 text-[11px] text-warn">{note}</p>}
+    </Section>
+  )
 }
 
 const typeBadge: Record<Clip['type'], string> = {

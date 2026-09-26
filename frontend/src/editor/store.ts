@@ -86,6 +86,10 @@ interface EditorState {
   toggleKey: (id: string, prop: AnimProp) => void
   setKeyEase: (id: string, ease: Ease) => void
   clearKeys: (id: string, prop?: AnimProp) => void
+  /** Retime a clip (same footage, new speed). Returns the speed actually applied. */
+  setClipSpeed: (id: string, speed: number) => number
+  /** Choose the speed that makes the clip's footage play for ``seconds``. */
+  fitClipDuration: (id: string, seconds: number) => number
   addAssetClip: (asset: Asset, opts?: { trackId?: string; start?: number }) => string | null
   addTextClip: () => string
   moveClip: (id: string, start: number, trackId: string) => void
@@ -110,6 +114,44 @@ const emptyDoc: Doc = {
   settings: { width: 1920, height: 1080, fps: 30, background: '#000000' },
   tracks: [],
   clips: [],
+}
+
+export const MIN_SPEED = 0.25
+export const MAX_SPEED = 4
+
+/** Seconds from the clip's start to the next clip on its track (Infinity if none). */
+export function gapAfter(clips: Clip[], clip: Clip): number {
+  const next = clips
+    .filter((c) => c.track_id === clip.track_id && c.id !== clip.id && c.start >= clipEnd(clip) - 1e-6)
+    .reduce((m, c) => Math.min(m, c.start), Infinity)
+  return next - clip.start
+}
+
+/** Allowed speed range for a clip: the slowest speed is limited by the next clip. */
+export function speedRange(clips: Clip[], clip: Clip): { min: number; max: number; limitedByNext: boolean } {
+  const footage = clip.duration * clip.speed
+  const fitMin = footage / gapAfter(clips, clip)
+  const min = Math.max(MIN_SPEED, fitMin)
+  return { min: Math.min(min, MAX_SPEED), max: MAX_SPEED, limitedByNext: fitMin > MIN_SPEED }
+}
+
+/** Retime one clip, keeping its footage (source range), fades and key moments. */
+function retime(c: Clip, speed: number): Clip {
+  const footage = c.duration * c.speed
+  const duration = Math.max(MIN_CLIP, footage / speed)
+  const k = duration / c.duration
+  const keyframes: Clip['keyframes'] = {}
+  for (const [prop, frames] of Object.entries(c.keyframes ?? {}) as [AnimProp, Clip['keyframes'][AnimProp]][]) {
+    keyframes[prop] = frames?.map((f) => ({ ...f, t: f.t * k }))
+  }
+  return {
+    ...c,
+    speed,
+    duration,
+    keyframes,
+    fade_in: Math.min(c.fade_in, duration),
+    fade_out: Math.min(c.fade_out, duration),
+  }
 }
 
 /** Set a property's static (non-animated) value. */
@@ -359,6 +401,21 @@ export const useEditor = create<EditorState>((set, get) => {
           return { ...c, keyframes }
         }),
       )
+    },
+
+    setClipSpeed: (id, wanted) => {
+      const clip = get().doc.clips.find((c) => c.id === id)
+      if (!clip || (clip.type !== 'video' && clip.type !== 'audio')) return clip?.speed ?? 1
+      const { min, max } = speedRange(get().doc.clips, clip)
+      const speed = Math.round(clamp(wanted, min, max) * 1000) / 1000
+      if (Math.abs(speed - clip.speed) > 1e-9) setClips((clips) => clips.map((c) => (c.id === id ? retime(c, speed) : c)))
+      return speed
+    },
+
+    fitClipDuration: (id, seconds) => {
+      const clip = get().doc.clips.find((c) => c.id === id)
+      if (!clip || seconds <= 0) return clip?.speed ?? 1
+      return get().setClipSpeed(id, (clip.duration * clip.speed) / seconds)
     },
 
     clearKeys: (id, prop) => {

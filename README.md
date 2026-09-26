@@ -60,8 +60,10 @@ videos can be uploaded.
 * **Timeline** — multiple video (layer) and audio tracks; move clips between
   tracks, trim either edge, split, duplicate, snapping, zoom, mute / hide /
   lock tracks, undo / redo.
-* **Clip properties** — position, scale, rotation, opacity, flip, crop,
-  speed (0.25×–4×), volume (0–400 %) with fade in / out, text clips with font,
+* **Speed** — 0.25×–4× with a hold-to-repeat stepper and presets; the clip
+  resizes on the timeline as you change it, or type a length in **Fit to**
+  and the speed is chosen so the same footage plays in exactly that time.
+* **Clip properties** — position, scale, rotation, opacity, flip, crop, volume (0–400 %) with fade in / out, text clips with font,
   size, colour, outline and background box.
 * **Keyframes** — animate position, scale, rotation, opacity and volume —
   and for text clips also font size, colour, outline colour/width, box colour
