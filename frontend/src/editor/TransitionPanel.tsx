@@ -5,7 +5,7 @@ import { useMediaQuery } from '../lib/useMedia'
 import { api } from '../api/client'
 import { toast } from '../components/toast'
 import { Button, NumberInput, Spinner } from '../components/ui'
-import { cuts, transitionLength, useEditor } from './store'
+import { allSequences, cuts, transitionLength, useEditor } from './store'
 import { useTransitionCatalog } from './transitionCatalog'
 import { Section } from '../components/Section'
 
@@ -34,7 +34,11 @@ export function TransitionPanel({ clipId }: { clipId: string }) {
     )
 
   const label = (c: typeof cut.a) =>
-    c.type === 'text' ? (c.text?.content.split('\n')[0] ?? 'Text') : (assets.find((a) => a.id === c.asset_id)?.original_name ?? 'Clip')
+    c.type === 'text'
+      ? (c.text?.content.split('\n')[0] ?? 'Text')
+      : c.type === 'sequence'
+        ? (allSequences(doc).find((x) => x.id === c.sequence_id)?.name ?? 'Sequence')
+        : (assets.find((a) => a.id === c.asset_id)?.original_name ?? 'Clip')
   const maxD = Math.min(catalog?.max_duration ?? 5, cut.a.duration, cut.b.duration)
   const minD = catalog?.min_duration ?? 0.1
   const current = catalog?.transitions.find((x) => x.id === t.kind)

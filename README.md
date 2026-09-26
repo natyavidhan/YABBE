@@ -64,6 +64,12 @@ videos can be uploaded.
   switch with the tabs above the timeline, and pick any sequence in the export
   dialog. Undo covers every sequence. Projects from before sequences open with
   their timeline as the main sequence.
+  **Nesting:** drag a sequence from the panel onto a timeline (or use *Add to
+  timeline*) to use it like a clip — trim, speed, transform, crop, keyframes,
+  transitions and volume all work. Double-click it to open and edit it; a
+  breadcrumb leads back. Like After Effects precomps, a nested sequence's
+  background is transparent, so only its content covers what's underneath.
+  A sequence can never end up inside itself.
 * **Timeline** — multiple video (layer) and audio tracks; move clips between
   tracks, trim either edge, split, duplicate, snapping, zoom, mute / hide /
   lock tracks, undo / redo.

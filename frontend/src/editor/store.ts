@@ -149,6 +149,11 @@ interface EditorState {
   renameSequence: (id: string, name: string) => void
   deleteSequence: (id: string) => void
   setMainSequence: (id: string) => void
+  /** Place a sequence on the open timeline. Returns an error message or null. */
+  addSequenceClip: (sequenceId: string, opts?: { trackId?: string; start?: number }) => string | null
+  /** Sequences above the open one when it was opened from a nested clip (breadcrumbs). */
+  crumbs: string[]
+  openNested: (sequenceId: string) => void
 
   // graph editor (view state; not part of the project or undo history)
   graphOpen: boolean
@@ -308,6 +313,60 @@ export function timelineOf(doc: Doc): Timeline {
   return { sequence_id: doc.active, settings: doc.settings, tracks: doc.tracks, clips: doc.clips }
 }
 
+// -- nested sequences ------------------------------------------------------------------
+
+export const nestedAssetId = (sequenceId: string) => `seq:${sequenceId}`
+
+/** A virtual asset describing a sequence, so nested clips work like footage. */
+export function sequenceAsset(seq: Sequence): Asset {
+  return {
+    id: nestedAssetId(seq.id),
+    kind: 'video',
+    filename: '',
+    original_name: seq.name,
+    size: 0,
+    duration: sequenceDuration(seq),
+    width: seq.settings.width,
+    height: seq.settings.height,
+    fps: seq.settings.fps,
+    has_video: true,
+    has_audio: true,
+    status: 'ready',
+    error: null,
+    thumb_count: 0,
+    thumb_interval: 0,
+    created_at: seq.created_at ?? 0,
+  }
+}
+
+/** Key to look a clip's source up in assetsWithSequences(). */
+export const assetKey = (c: Clip): string | null =>
+  c.type === 'sequence' ? (c.sequence_id ? nestedAssetId(c.sequence_id) : null) : c.asset_id
+
+/** Uploaded assets plus one virtual asset per sequence. */
+export function assetsWithSequences(assets: Asset[], doc: Doc): Asset[] {
+  return [...assets, ...allSequences(doc).map(sequenceAsset)]
+}
+
+/** Does ``outer`` use ``inner`` (directly or through other sequences)? */
+export function sequenceContains(doc: Doc, outer: string, inner: string): boolean {
+  const seqs = new Map(allSequences(doc).map((s) => [s.id, s]))
+  const seen = new Set<string>()
+  const todo = [outer]
+  while (todo.length) {
+    const cur = seqs.get(todo.pop()!)
+    for (const c of cur?.clips ?? []) {
+      if (c.type !== 'sequence' || !c.sequence_id) continue
+      if (c.sequence_id === inner) return true
+      if (!seen.has(c.sequence_id)) {
+        seen.add(c.sequence_id)
+        todo.push(c.sequence_id)
+      }
+    }
+  }
+  return false
+}
+
 /** Every sequence with the open one's live contents merged in. */
 export function allSequences(doc: Doc): Sequence[] {
   return doc.sequences.map((s) =>
@@ -333,7 +392,8 @@ export function trackKindFor(type: ClipType): TrackKind {
   return type === 'audio' ? 'audio' : 'video'
 }
 
-/** Max timeline length a clip can have given its source. Infinity for stills/text. */
+/** Max timeline length a clip can have given its source (for nested sequences the
+ * virtual asset's duration). Infinity for stills/text. */
 export function maxClipDuration(clip: Clip, asset: Asset | undefined): number {
   if (clip.type === 'text' || clip.type === 'image' || !asset) return Infinity
   return Math.max(MIN_CLIP, (asset.duration - clip.in_point) / clip.speed)
@@ -457,6 +517,7 @@ export const useEditor = create<EditorState>((set, get) => {
       saveTabs(s.projectId, openTabs)
       // Switching isn't an edit: no undo entry, no autosave needed.
       set({
+        crumbs: [],
         doc: withActive(s.doc, id),
         seqView,
         openTabs,
@@ -520,12 +581,48 @@ export const useEditor = create<EditorState>((set, get) => {
       const s = get()
       if (id === s.doc.main || s.doc.sequences.length <= 1) return
       if (s.doc.active === id) get().openSequence(s.doc.main)
-      change((d) => ({ ...d, sequences: allSequences(d).filter((x) => x.id !== id) }))
+      change((d) => {
+        const sequences = allSequences(d)
+          .filter((x) => x.id !== id)
+          .map((x) => ({ ...x, clips: x.clips.filter((c) => !(c.type === 'sequence' && c.sequence_id === id)) }))
+        const open = sequences.find((x) => x.id === d.active)!
+        return { ...d, sequences, settings: open.settings, tracks: open.tracks, clips: open.clips }
+      })
       const openTabs = get().openTabs.filter((t) => t !== id)
       saveTabs(s.projectId, openTabs)
       set({ openTabs: openTabs.length ? openTabs : [get().doc.main] })
     },
     setMainSequence: (id) => change((d) => ({ ...d, main: id })),
+
+    crumbs: [],
+    openNested: (id) => {
+      const s = get()
+      const crumbs = [...s.crumbs, s.doc.active]
+      get().openSequence(id)
+      set({ crumbs })
+    },
+
+    addSequenceClip: (sequenceId, opts = {}) => {
+      const { doc, playhead } = get()
+      const seq = allSequences(doc).find((x) => x.id === sequenceId)
+      if (!seq) return 'That sequence no longer exists'
+      if (sequenceId === doc.active) return 'A sequence can’t contain itself'
+      if (sequenceContains(doc, sequenceId, doc.active))
+        return `“${seq.name}” already contains this sequence, so it can’t go inside it`
+      let tracks = doc.tracks
+      let track = doc.tracks.find((t) => t.id === opts.trackId && t.kind === 'video' && !t.locked)
+      if (!track) track = [...doc.tracks].reverse().find((t) => t.kind === 'video' && !t.locked)
+      if (!track) {
+        track = { id: uid('t_'), kind: 'video', name: `Video ${doc.tracks.length + 1}`, muted: false, hidden: false, locked: false }
+        tracks = [track, ...doc.tracks]
+      }
+      const duration = Math.max(sequenceDuration(seq), 1)
+      const start = findFreeStart(doc.clips, track.id, opts.start ?? playhead, duration)
+      const clip = makeClip({ track_id: track.id, type: 'sequence', sequence_id: sequenceId, start, duration })
+      change((d) => ({ ...d, tracks, clips: [...d.clips, clip] }))
+      set({ selection: [clip.id] })
+      return null
+    },
 
     selectTransition: (clipId) => set(clipId ? { transSel: clipId, selection: [], graphSel: [] } : { transSel: null }),
     setTransition: (clipId, t) =>

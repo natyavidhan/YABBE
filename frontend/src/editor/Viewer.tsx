@@ -10,7 +10,7 @@ import { usePrefs } from '../lib/prefs'
 import { useMediaQuery } from '../lib/useMedia'
 import { hitTest, layerOf, type Layer } from './geometry'
 import { MotionPath } from './MotionPath'
-import { clipEnd, docDuration, timelineOf, useEditor } from './store'
+import { assetsWithSequences, clipEnd, docDuration, timelineOf, useEditor } from './store'
 
 type Quality = 'auto' | 360 | 480 | 720 | 1080 | 'full'
 const QUALITY_KEY = 'yabbe.previewQuality'
@@ -425,7 +425,7 @@ function TransformOverlay({ width }: { width: number }) {
   const ref = useRef<HTMLDivElement>(null)
   const k = width / doc.settings.width
 
-  const assetMap = useMemo(() => new Map<string, Asset>(assets.map((a) => [a.id, a])), [assets])
+  const assetMap = useMemo(() => new Map<string, Asset>(assetsWithSequences(assets, doc).map((a) => [a.id, a])), [assets, doc])
 
   // Visible visual layers at the playhead, top-most first.
   const layers = useMemo(() => {

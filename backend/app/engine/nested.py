@@ -29,6 +29,9 @@ class Source(NamedTuple):
     offset: float = 0.0
 
 
+# Bump when the render format changes so old cached renders aren't reused.
+RENDER_VERSION = "alpha1"
+
 _locks: dict[str, threading.Lock] = {}
 _guard = threading.Lock()
 
@@ -95,15 +98,18 @@ def render_still(project: Project, sequence_id: str, t: float, height: int, draf
         return None
     fps = seq.settings.fps
     t = max(0.0, int(t * fps + 1e-6) / fps)
-    key = hashlib.sha1(f"{sequence_key(project, sequence_id)}|still|{t:.5f}|{height}|{draft}".encode()).hexdigest()[:24]
+    key = hashlib.sha1(
+        f"{RENDER_VERSION}|{sequence_key(project, sequence_id)}|still|{t:.5f}|{height}|{draft}".encode()
+    ).hexdigest()[:24]
     out = _cache_dir(project.id) / f"{key}.png"
 
     def render():
         view = project.view(sequence_id)
         win = compositor.Window(t, t + 1 / fps, scale=height / seq.settings.height, use_proxies=draft, audio=False)
-        g = compositor.build(view, win, stack=stack)
+        g = compositor.build(view, win, stack=stack, transparent=True)
         tmp = out.with_suffix(".part.png")
-        ffmpeg.run(["-y", *g.args(), "-frames:v", "1", "-update", "1", "-f", "image2", str(tmp)], timeout=300)
+        ffmpeg.run(["-y", *g.args(), "-frames:v", "1", "-pix_fmt", "rgba", "-update", "1", "-f", "image2", str(tmp)],
+                   timeout=300)
         tmp.replace(out)
 
     return _locked_render(out, render)
@@ -124,7 +130,7 @@ def render_range(project: Project, sequence_id: str, start: float, length: float
     if pre is not None:
         return Source(pre, start)
     key = hashlib.sha1(
-        f"{sequence_key(project, sequence_id)}|{start:.5f}|{length:.5f}|{height}|{draft}|{video}".encode()
+        f"{RENDER_VERSION}|{sequence_key(project, sequence_id)}|{start:.5f}|{length:.5f}|{height}|{draft}|{video}".encode()
     ).hexdigest()[:24]
     out = _cache_dir(project.id) / f"{key}.{'mkv' if video else 'mka'}"
 
@@ -132,9 +138,9 @@ def render_range(project: Project, sequence_id: str, start: float, length: float
         view = project.view(sequence_id)
         win = compositor.Window(start, start + length, scale=height / seq.settings.height,
                                 use_proxies=draft, video=video, audio=True)
-        g = compositor.build(view, win, stack=stack)
+        g = compositor.build(view, win, stack=stack, transparent=True)
         tmp = out.with_name(out.stem + ".part" + out.suffix)
-        codec = ["-c:v", "ffv1", "-level", "3", "-g", "1", "-slices", "4", "-pix_fmt", "yuv420p"] if video else []
+        codec = ["-c:v", "ffv1", "-level", "3", "-g", "1", "-slices", "4", "-pix_fmt", "yuva420p"] if video else []
         ffmpeg.run(["-y", *g.args(), *codec, "-c:a", "pcm_s16le", "-t", f"{length:.6f}",
                     "-f", "matroska", str(tmp)], timeout=3600)
         tmp.replace(out)

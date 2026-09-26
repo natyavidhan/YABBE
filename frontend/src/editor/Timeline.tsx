@@ -7,6 +7,7 @@ import {
   Copy,
   ChartSpline,
   ArrowRightLeft,
+  Clapperboard,
   Eye,
   FlagTriangleRight,
   Link2,
@@ -35,7 +36,8 @@ import { clamp } from '../lib/format'
 import { isTouchEvent, useIsMobile } from '../lib/useMedia'
 import { allKeyTimes, shiftKeyframes, shiftMarkers, visibleMarkers } from './keyframes'
 import { ASSET_MIME } from './MediaBin'
-import { allMarkers, clipEnd, cuts, docDuration, maxClipDuration, MIN_CLIP, overlaps, transitionLength, useEditor, withLinked } from './store'
+import { allMarkers, assetKey, assetsWithSequences, clipEnd, cuts, docDuration, maxClipDuration, MIN_CLIP, overlaps, transitionLength, useEditor, withLinked } from './store'
+import { SEQUENCE_MIME } from './Sequences'
 import { ContextMenu } from '../components/ContextMenu'
 import { useTransitionCatalog } from './transitionCatalog'
 
@@ -86,7 +88,7 @@ export function Timeline({ projectId }: { projectId: string }) {
   const headerRef = useRef(headerW)
   headerRef.current = headerW
 
-  const assetMap = useMemo(() => new Map<string, Asset>(assets.map((a) => [a.id, a])), [assets])
+  const assetMap = useMemo(() => new Map<string, Asset>(assetsWithSequences(assets, doc).map((a) => [a.id, a])), [assets, doc])
   const contentSeconds = Math.max(duration + 30, (view.width - headerW) / zoom)
   const contentWidth = contentSeconds * zoom
 
@@ -267,9 +269,9 @@ export function Timeline({ projectId }: { projectId: string }) {
         if (valid) s.change((doc) => ({ ...doc, clips: next }))
       } else {
         const o = d.original
-        const asset = o.asset_id ? assetMap.get(o.asset_id) : undefined
+        const asset = assetMap.get(assetKey(o) ?? '')
         const others = clipsNow.filter((c) => c.track_id === o.track_id && c.id !== o.id)
-        const hasSource = o.type === 'video' || o.type === 'audio'
+        const hasSource = o.type === 'video' || o.type === 'audio' || o.type === 'sequence'
         if (d.kind === 'trim-start') {
           const prevEnd = Math.max(0, ...others.filter((c) => clipEnd(c) <= o.start + 1e-6).map(clipEnd))
           const lower = Math.max(prevEnd, hasSource ? o.start - o.in_point / o.speed : 0)
@@ -501,6 +503,13 @@ export function Timeline({ projectId }: { projectId: string }) {
   }
 
   const onDrop = (e: React.DragEvent, track: Track) => {
+    const seqId = e.dataTransfer.getData(SEQUENCE_MIME)
+    if (seqId) {
+      e.preventDefault()
+      const err = useEditor.getState().addSequenceClip(seqId, { trackId: track.id, start: timeAt(e.clientX) })
+      if (err) toast.info(err)
+      return
+    }
     const id = e.dataTransfer.getData(ASSET_MIME)
     if (!id) return
     e.preventDefault()
@@ -558,7 +567,7 @@ export function Timeline({ projectId }: { projectId: string }) {
                   onPointerDown={onLaneDown}
                   onClick={onLaneClick}
                   onDragOver={(e) => {
-                    if (e.dataTransfer.types.includes(ASSET_MIME)) {
+                    if (e.dataTransfer.types.includes(ASSET_MIME) || e.dataTransfer.types.includes(SEQUENCE_MIME)) {
                       e.preventDefault()
                       e.dataTransfer.dropEffect = 'copy'
                     }
@@ -572,7 +581,7 @@ export function Timeline({ projectId }: { projectId: string }) {
                         key={c.id}
                         projectId={projectId}
                         clip={c}
-                        asset={c.asset_id ? assetMap.get(c.asset_id) : undefined}
+                        asset={assetMap.get(assetKey(c) ?? '')}
                         zoom={zoom}
                         height={rowHeight(track, collapsed)}
                         selected={selection.includes(c.id)}
@@ -930,6 +939,7 @@ const CLIP_COLORS: Record<Clip['type'], string> = {
   image: 'bg-clip-image/80 border-clip-image',
   text: 'bg-clip-text/80 border-clip-text',
   audio: 'bg-clip-audio/80 border-clip-audio',
+  sequence: 'bg-clip-sequence/80 border-clip-sequence',
 }
 
 const TimelineClip = memo(function TimelineClip({
@@ -960,7 +970,9 @@ const TimelineClip = memo(function TimelineClip({
   const left = clip.start * zoom
   const width = Math.max(2, clip.duration * zoom)
   const label =
-    clip.type === 'text' ? (clip.text?.content.split('\n')[0] ?? 'Text') : (asset?.original_name ?? 'Missing media')
+    clip.type === 'text'
+      ? (clip.text?.content.split('\n')[0] ?? 'Text')
+      : (asset?.original_name ?? (clip.type === 'sequence' ? 'Missing sequence' : 'Missing media'))
   const ready = asset?.status === 'ready'
   const bodyH = height - 4 - 16
   const roomy = bodyH >= 10 // collapsed tracks show a slim labelled bar only
@@ -976,9 +988,11 @@ const TimelineClip = memo(function TimelineClip({
       style={{ left, width, height: height - 4, touchAction: selected ? 'none' : 'pan-x pan-y' }}
       onPointerDown={(e) => onDown(e, clip, 'body')}
       onContextMenu={(e) => onContextMenu(e, clip)}
-      title={linked ? `${label} (linked — Alt+click selects just this clip)` : label}
+      onDoubleClick={() => clip.type === 'sequence' && clip.sequence_id && useEditor.getState().openNested(clip.sequence_id)}
+      title={`${label}${clip.type === 'sequence' ? ' — double-click to open' : ''}${linked ? ' (linked — Alt+click selects just this clip)' : ''}`}
     >
       <div className="flex h-4 items-center gap-1 overflow-hidden px-1.5 text-[10px] leading-4 font-medium whitespace-nowrap text-white/95">
+        {clip.type === 'sequence' && <Clapperboard size={10} className="shrink-0" aria-label="Sequence" />}
         {linked && <Link2 size={10} className="shrink-0" aria-label="Linked" />}
         {clip.muted && <VolumeX size={10} />}
         <span className="truncate">{label}</span>

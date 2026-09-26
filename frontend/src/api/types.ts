@@ -71,7 +71,7 @@ export interface TextStyle {
   line_spacing: number
 }
 
-export type ClipType = 'video' | 'audio' | 'image' | 'text'
+export type ClipType = 'video' | 'audio' | 'image' | 'text' | 'sequence'
 
 export type AnimProp =
   | 'x'
@@ -157,6 +157,8 @@ export interface Clip {
   track_id: string
   type: ClipType
   asset_id: string | null
+  /** For type 'sequence': the nested sequence. */
+  sequence_id?: string | null
   start: number
   duration: number
   in_point: number

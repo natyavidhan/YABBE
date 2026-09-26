@@ -29,7 +29,8 @@ export function sourceSize(
     // Fall back to the static size while the animated one is being measured.
     return textSizes[textKey(style)] ?? (clip.text ? (textSizes[textKey(clip.text)] ?? null) : null)
   }
-  const a = clip.asset_id ? assets.get(clip.asset_id) : undefined
+  const key = clip.type === 'sequence' ? (clip.sequence_id ? `seq:${clip.sequence_id}` : null) : clip.asset_id
+  const a = key ? assets.get(key) : undefined
   if (!a || !a.width || !a.height) return null
   return { width: a.width, height: a.height }
 }

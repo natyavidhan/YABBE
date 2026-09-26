@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChartSpline,
+  Clapperboard,
   Diamond,
   Flag,
   Gauge,
@@ -29,7 +30,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api } from '../api/client'
 import type { AnimProp, Asset, Clip, Ease } from '../api/types'
-import { IconButton, inputClass, NumberInput } from '../components/ui'
+import { Button, IconButton, inputClass, NumberInput } from '../components/ui'
 import { formatDuration, formatTimecode } from '../lib/format'
 import { toast } from '../components/toast'
 import { fillScale, sourceSize } from './geometry'
@@ -37,7 +38,7 @@ import { allKeyTimes, EASES, framesOf, keyIndexAt, localTime, MARKER_COLORS, pro
 import { ProjectSettingsForm } from './ProjectSettings'
 import { FoldAllButton, Section } from '../components/Section'
 import { TransitionPanel } from './TransitionPanel'
-import { clipEnd, gapAfter, MAX_SPEED, maxClipDuration, MIN_CLIP, MIN_SPEED, overlaps, speedRange, useEditor, type ClipPatch } from './store'
+import { allSequences, clipEnd, gapAfter, sequenceAsset, MAX_SPEED, maxClipDuration, MIN_CLIP, MIN_SPEED, overlaps, speedRange, useEditor, type ClipPatch } from './store'
 
 export function Inspector() {
   const transSel = useEditor((s) => s.transSel)
@@ -49,7 +50,16 @@ function ClipOrProjectInspector() {
   const seqName = useEditor((s) => s.doc.sequences.find((x) => x.id === s.doc.active)?.name ?? 'Sequence')
   const selection = useEditor((s) => s.selection)
   const clip = useEditor((s) => (s.selection.length === 1 ? s.doc.clips.find((c) => c.id === s.selection[0]) : undefined))
-  const asset = useEditor((s) => (clip?.asset_id ? s.assets.find((a) => a.id === clip.asset_id) : undefined))
+  const doc = useEditor((s) => s.doc)
+  const assets = useEditor((s) => s.assets)
+  const asset = useMemo(() => {
+    if (!clip) return undefined
+    if (clip.type === 'sequence') {
+      const seq = allSequences(doc).find((x) => x.id === clip.sequence_id)
+      return seq ? sequenceAsset(seq) : undefined
+    }
+    return clip.asset_id ? assets.find((a) => a.id === clip.asset_id) : undefined
+  }, [clip, doc, assets])
 
   if (selection.length > 1)
     return (
@@ -170,7 +180,7 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
   const assetMap = useMemo(() => new Map(asset ? [[asset.id, asset]] : []), [asset])
   const size = sourceSize(clip, assetMap, textSizes)
   const visual = clip.type !== 'audio'
-  const hasAudio = (clip.type === 'audio' || clip.type === 'video') && (asset?.has_audio ?? false)
+  const hasAudio = (clip.type === 'audio' || clip.type === 'video' || clip.type === 'sequence') && (asset?.has_audio ?? false)
   const scrub = { onScrubStart: beginGesture, onScrubEnd: endGesture }
   const playhead = useEditor((s) => s.playhead)
   // Animatable values shown/edited at the playhead (keyframed props auto-key).
@@ -224,7 +234,7 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
         <div className="grid grid-cols-2 gap-2">
           <NumberInput label="Start" value={clip.start} onChange={setStart} step={0.1} min={0} precision={2} suffix="s" {...scrub} scrubScale={0.2} />
           <NumberInput label="Length" value={clip.duration} onChange={setDuration} step={0.1} min={MIN_CLIP} precision={2} suffix="s" {...scrub} scrubScale={0.2} />
-          {(clip.type === 'video' || clip.type === 'audio') && (
+          {(clip.type === 'video' || clip.type === 'audio' || clip.type === 'sequence') && (
             <>
               <NumberInput
                 label="In"
@@ -250,7 +260,9 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
         )}
       </Section>
 
-      {(clip.type === 'video' || clip.type === 'audio') && <SpeedSection clip={clip} locked={locked} />}
+      {clip.type === 'sequence' && asset && <NestedSection clip={clip} asset={asset} />}
+
+      {(clip.type === 'video' || clip.type === 'audio' || clip.type === 'sequence') && <SpeedSection clip={clip} locked={locked} />}
 
       <MarkersSection clip={clip} locked={locked} />
 
@@ -341,7 +353,7 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
         </Section>
       )}
 
-      {(clip.type === 'video' || clip.type === 'image') && (
+      {(clip.type === 'video' || clip.type === 'image' || clip.type === 'sequence') && (
         <Section icon={<CropIcon size={14} />} title="Crop" onReset={() => set({ crop: { left: 0, top: 0, right: 0, bottom: 0 } })}>
           {(['left', 'right', 'top', 'bottom'] as const).map((side) => {
             const opposite = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' } as const
@@ -520,6 +532,21 @@ function KeyframeBar({ clip, disabled }: { clip: Clip; disabled?: boolean }) {
         <X size={13} />
       </IconButton>
     </div>
+  )
+}
+
+/** A nested sequence clip: what it shows and a way in. */
+function NestedSection({ clip, asset }: { clip: Clip; asset: Asset }) {
+  return (
+    <Section icon={<Clapperboard size={14} />} title="Sequence">
+      <p className="text-[11px] text-faint">
+        {asset.width}×{asset.height} · {asset.fps} fps · {formatDuration(asset.duration)} long. Changes inside the sequence
+        show up here automatically.
+      </p>
+      <Button size="sm" onClick={() => clip.sequence_id && useEditor.getState().openNested(clip.sequence_id)}>
+        <Clapperboard size={13} /> Open “{asset.original_name}”
+      </Button>
+    </Section>
   )
 }
 
@@ -779,6 +806,7 @@ const typeBadge: Record<Clip['type'], string> = {
   image: 'bg-clip-image/25 text-[#66d9e8]',
   text: 'bg-clip-text/25 text-[#e599f7]',
   audio: 'bg-clip-audio/25 text-[#8ce99a]',
+  sequence: 'bg-clip-sequence/25 text-[#ffa94d]',
 }
 
 let fontsPromise: Promise<string[]> | null = null

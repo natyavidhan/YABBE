@@ -2,11 +2,14 @@ import { Clapperboard, Copy, MoreHorizontal, Pencil, Plus, Settings2, Star, Tras
 import { useState } from 'react'
 import type { Sequence } from '../api/types'
 import { ContextMenu, type MenuItem } from '../components/ContextMenu'
+import { toast } from '../components/toast'
 import { Button, Field, inputClass, Modal } from '../components/ui'
 import { formatDuration } from '../lib/format'
 import { FPS_PRESETS, RESOLUTION_PRESETS } from '../lib/presets'
 import { ProjectSettingsDialog } from './ProjectSettings'
 import { allSequences, sequenceDuration, useEditor } from './store'
+
+export const SEQUENCE_MIME = 'application/x-yabbe-sequence'
 
 /** Left-panel list of every sequence in the project. */
 export function SequencesPanel({ onOpened }: { onOpened?: () => void }) {
@@ -23,8 +26,20 @@ export function SequencesPanel({ onOpened }: { onOpened?: () => void }) {
     s.openSequence(id)
     onOpened?.()
   }
+  const addToTimeline = (id: string) => {
+    const err = s.addSequenceClip(id)
+    if (err) toast.info(err)
+    else onOpened?.()
+  }
+  const usesOf = (id: string) => seqs.reduce((n, x) => n + x.clips.filter((c) => c.type === 'sequence' && c.sequence_id === id).length, 0)
   const items = (seq: Sequence): (MenuItem | 'divider')[] => [
     { label: 'Open', icon: <Clapperboard size={13} />, onSelect: () => open(seq.id) },
+    {
+      label: 'Add to timeline',
+      icon: <Plus size={13} />,
+      disabled: seq.id === doc.active,
+      onSelect: () => addToTimeline(seq.id),
+    },
     { label: 'Rename', icon: <Pencil size={13} />, onSelect: () => setRenaming(seq.id) },
     { label: 'Duplicate', icon: <Copy size={13} />, onSelect: () => s.duplicateSequence(seq.id) },
     {
@@ -62,6 +77,12 @@ export function SequencesPanel({ onOpened }: { onOpened?: () => void }) {
           return (
             <li
               key={seq.id}
+              draggable={seq.id !== doc.active}
+              onDragStart={(e) => {
+                e.dataTransfer.setData(SEQUENCE_MIME, seq.id)
+                e.dataTransfer.effectAllowed = 'copy'
+              }}
+              title={seq.id === doc.active ? undefined : 'Drag onto the timeline to use it inside the open sequence'}
               onContextMenu={(e) => {
                 e.preventDefault()
                 setMenu({ id: seq.id, x: e.clientX, y: e.clientY })
@@ -150,8 +171,14 @@ export function SequencesPanel({ onOpened }: { onOpened?: () => void }) {
           }
         >
           <p className="text-muted">
-            “<span className="text-fg">{confirmDelete.name}</span>” and everything on its timeline will be removed. Media
-            files stay in the project. You can undo this.
+            “<span className="text-fg">{confirmDelete.name}</span>” and everything on its timeline will be removed
+            {usesOf(confirmDelete.id) > 0 && (
+              <>
+                , along with the <span className="text-fg">{usesOf(confirmDelete.id)}</span> clip
+                {usesOf(confirmDelete.id) === 1 ? '' : 's'} using it in other sequences
+              </>
+            )}
+            . Media files stay in the project. You can undo this.
           </p>
         </Modal>
       )}
@@ -234,6 +261,7 @@ export function NewSequenceDialog({ onClose, onCreated }: { onClose: () => void;
 export function SequenceTabs() {
   const doc = useEditor((s) => s.doc)
   const tabs = useEditor((s) => s.openTabs)
+  const crumbs = useEditor((s) => s.crumbs)
   const [creating, setCreating] = useState(false)
   const seqs = allSequences(doc)
   const s = useEditor.getState()
@@ -244,6 +272,30 @@ export function SequenceTabs() {
   }
   return (
     <div className="flex h-8 shrink-0 items-end gap-0.5 overflow-x-auto border-b border-line bg-bg px-1.5" role="tablist" aria-label="Open sequences">
+      {crumbs.length > 0 && (
+        <nav aria-label="Nested in" className="mr-1 flex h-7 shrink-0 items-center gap-0.5 text-[11px] text-muted">
+          {crumbs.map((id, i) => {
+            const seq = seqs.find((x) => x.id === id)
+            if (!seq) return null
+            return (
+              <span key={id + i} className="flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    s.openSequence(id)
+                    useEditor.setState({ crumbs: crumbs.slice(0, i) })
+                  }}
+                  className="rounded px-1 py-0.5 hover:bg-raised hover:text-fg"
+                  title={`Back to ${seq.name}`}
+                >
+                  {seq.name}
+                </button>
+                <span className="text-faint">›</span>
+              </span>
+            )
+          })}
+        </nav>
+      )}
       {list.map((seq) => {
         const active = seq.id === doc.active
         return (

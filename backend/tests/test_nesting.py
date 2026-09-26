@@ -59,7 +59,7 @@ def test_nesting(client, tmp_path):
     assert r.status_code == 200, r.text
     assert len(main_seq(r.json())["clips"]) == 2
 
-    # frame: blue in the centre (half scale), black at the corner
+    # frame: blue in the centre (half scale), black (parent background) at the corner
     assert _frame(client, pid, 1.0, (160, 90))[2] > 180
     assert max(_frame(client, pid, 1.0, (10, 10))) < 30
     # inner switches to red at its 2 s
@@ -103,3 +103,40 @@ def test_nesting(client, tmp_path):
     still = tmp_path / "s.png"
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", "1", "-i", str(mp4), "-frames:v", "1", str(still)], check=True)
     assert Image.open(still).convert("RGB").getpixel((160, 90))[0] > 150
+
+
+def test_nested_background_is_transparent(client, tmp_path):
+    """Like an After Effects precomp: only the nested sequence's content shows;
+    its background colour doesn't cover what's underneath."""
+    green = tmp_path / "g.png"
+    Image.new("RGB", (320, 180), (30, 200, 30)).save(green)
+    pid = client.post("/api/projects", json={"name": "alpha", "width": 320, "height": 180, "fps": 25}).json()["id"]
+    g = _upload(client, pid, green)
+    main = main_seq(_wait_ready(client, pid))
+    top, bottom = main["tracks"][0]["id"], main["tracks"][1]["id"]
+    overlay = _seq("s_ov", "Lower third", [
+        {"track_id": "s_ov_v", "type": "text", "start": 0, "duration": 3, "text": {"content": "LOWER", "size": 40},
+         "transform": {"y": 60}},
+    ])
+    overlay["settings"]["background"] = "#ff00ff"  # must NOT show when nested
+    main["clips"] = [
+        {"track_id": bottom, "type": "image", "asset_id": g["id"], "start": 0, "duration": 3},
+        {"track_id": top, "type": "sequence", "sequence_id": "s_ov", "start": 0, "duration": 3},
+    ]
+    assert client.put(f"/api/projects/{pid}", json={"sequences": [main, overlay]}).status_code == 200
+    corner = _frame(client, pid, 1.0, (20, 20))
+    assert corner[1] > 150 and corner[0] < 90, corner  # green photo shows through, no magenta
+    text_px = _frame(client, pid, 1.0)
+    assert max(p[0] + p[1] + p[2] for p in text_px.crop((100, 130, 220, 170)).getdata()) > 600  # white text drawn
+    # also in rendered playback segments / exports (FFV1 with alpha)
+    r = client.post(f"/api/projects/{pid}/exports", json={"quality": "high"})
+    assert _wait_job(client, r.json()["job"]["id"])["status"] == "done"
+    mp4 = tmp_path / "a.mp4"
+    mp4.write_bytes(client.get(f"/api/projects/{pid}/exports/{r.json()['export']['id']}/download").content)
+    png = tmp_path / "a.png"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", "1", "-i", str(mp4), "-frames:v", "1", str(png)], check=True)
+    px = Image.open(png).convert("RGB").getpixel((20, 20))
+    assert px[1] > 150 and px[0] < 90, px
+    # opened on its own, the sequence still uses its background colour
+    own = _frame(client, pid, 1.0, (20, 20), seq="s_ov")
+    assert own[0] > 200 and own[2] > 200 and own[1] < 60, own

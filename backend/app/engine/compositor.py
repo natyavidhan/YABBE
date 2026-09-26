@@ -378,7 +378,9 @@ def _video_layer(
     if tr.flip_v:
         chain.append("vflip")
     rotating = bool(rot_kf) or abs(rot0 % 360) > EPS
-    needs_alpha = clip.type in ("image", "text") or op0 < 1 or bool(op_kf) or rotating or bool(scale_kf)
+    needs_alpha = (
+        clip.type in ("image", "text", "sequence") or op0 < 1 or bool(op_kf) or rotating or bool(scale_kf)
+    )
     if needs_alpha:
         chain.append("format=rgba")
     if scale_kf:
@@ -455,8 +457,10 @@ def _audio_chain(
     return label
 
 
-def build(project: Project, win: Window, stack: tuple[str, ...] = ()) -> Graph:
-    """``stack``: sequences already being rendered further up (loop guard)."""
+def build(project: Project, win: Window, stack: tuple[str, ...] = (), transparent: bool = False) -> Graph:
+    """``stack``: sequences already being rendered further up (loop guard).
+    ``transparent``: no background colour (nested sequences, like After
+    Effects precomps) — the result carries alpha."""
     st = project.settings
     g = Graph()
     k = win.scale
@@ -596,20 +600,22 @@ def build(project: Project, win: Window, stack: tuple[str, ...] = ()) -> Graph:
     # ---- composite video ------------------------------------------------------------
     if win.video:
         g.has_video = True
+        bg = "black@0" if transparent else ffmpeg_color(st.background)
         g.filters.append(
-            f"color=c={ffmpeg_color(st.background)}:s={g.width}x{g.height}:r={_num(fps)}:d={_num(dur)},"
-            f"format=yuv420p[base]"
+            f"color=c={bg}:s={g.width}x{g.height}:r={_num(fps)}:d={_num(dur)},"
+            f"format={'rgba' if transparent else 'yuv420p'}[base]"
         )
         current = "base"
+        blend = ":format=rgb" if transparent else ""  # keep the canvas alpha
         items.sort(key=lambda it: (it[0], it[1]))
         for n, (_, _, label, name, ox, oy, a, b) in enumerate(items):
             out = f"ov{n}"
             g.filters.append(
-                f"[{current}][{label}]{name}=x={ox}:y={oy}"
+                f"[{current}][{label}]{name}=x={ox}:y={oy}{blend}"
                 f":eof_action=pass:enable='between(t,{_num(a - EPS)},{_num(b - EPS)})'[{out}]"
             )
             current = out
-        g.filters.append(f"[{current}]format=yuv420p[vout]")
+        g.filters.append(f"[{current}]format={'yuva420p' if transparent else 'yuv420p'}[vout]")
 
     # ---- mix audio --------------------------------------------------------------------
     if win.audio:

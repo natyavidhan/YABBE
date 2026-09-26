@@ -127,8 +127,9 @@ Ops
 ## Sequences roadmap
 - [x] Phase 1 — multiple sequences: model + upgrade of old projects,
       per-sequence rendering/export, sequences panel, tabs, settings
-- [ ] Phase 2 — nesting sequences inside sequences (hybrid live/cached
-      rendering, cycle checks, audio, open-from-clip, breadcrumbs)
+- [x] Phase 2 — nesting sequences inside sequences (hybrid live/cached
+      rendering, transparent nested backgrounds, cycle checks, audio,
+      open-from-clip, breadcrumbs)
 - [ ] Phase 3 — pre-rendering (draft/preview/full, auto draft in background,
       status badges, render queue, export renders dependencies first)
 - [ ] Phase 4 — pre-compose / un-nest, thumbnails, mobile polish
