@@ -40,10 +40,47 @@ class StorageFull(Exception):
 
 
 def disk() -> tuple[int, int, int]:
-    """(total, used, free) bytes of the disk holding the data directory."""
+    """(total, used, free) bytes available to YABBE: the data directory's disk,
+    or with YABBE_STORAGE_LIMIT_MB that limit (used = the data directory's size)."""
     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
     u = shutil.disk_usage(config.DATA_DIR)
-    return u.total, u.total - u.free, u.free
+    limit = config.STORAGE_LIMIT_MB * 1024 * 1024
+    if not limit:
+        return u.total, u.total - u.free, u.free
+    used = _dir_size(config.DATA_DIR)
+    return limit, used, max(0, min(limit - used, u.free))
+
+
+_size_cache: dict[str, tuple[float, int]] = {}
+
+
+def _dir_size(path: Path, max_age: float = 1.0) -> int:
+    """Bytes under ``path`` (cached for a moment: it's asked often while
+    cleaning up, and walking the tree isn't free)."""
+    hit = _size_cache.get(str(path))
+    if hit and time.monotonic() - hit[0] < max_age:
+        return hit[1]
+    total = 0
+    stack = [str(path)]
+    while stack:
+        try:
+            with os.scandir(stack.pop()) as it:
+                for e in it:
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            stack.append(e.path)
+                        else:
+                            total += e.stat(follow_symlinks=False).st_size
+                    except FileNotFoundError:
+                        pass
+        except (FileNotFoundError, NotADirectoryError):
+            pass
+    _size_cache[str(path)] = (time.monotonic(), total)
+    return total
+
+
+def _forget_size() -> None:
+    _size_cache.clear()
 
 
 def reserve() -> int:
@@ -77,6 +114,7 @@ def reclaim(want_free: int) -> int:
             shutil.rmtree(path, ignore_errors=True)
         else:
             path.unlink(missing_ok=True)
+        _forget_size()
         free = disk()[2]
         if free >= want_free:
             break

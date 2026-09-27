@@ -49,6 +49,9 @@ PREVIEW_WORKERS = int(os.environ.get("YABBE_PREVIEW_WORKERS", "2"))
 # Free space kept for proxies, previews and renders: uploads that would eat into
 # it are refused with a clear message instead of failing half-way.
 STORAGE_RESERVE_MB = int(os.environ.get("YABBE_STORAGE_RESERVE_MB", "100"))
+# Cap on everything under the data directory (0 = only the disk's own size),
+# e.g. 1024 to hand out a 1 GB test server.
+STORAGE_LIMIT_MB = int(os.environ.get("YABBE_STORAGE_LIMIT_MB", "0"))
 
 CORS_ORIGINS = [o for o in os.environ.get("YABBE_CORS_ORIGINS", "*").split(",") if o]
 

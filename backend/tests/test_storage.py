@@ -54,3 +54,24 @@ def test_reclaim_removes_old_previews(client, tmp_path):
     # Ask for more than the disk has: everything disposable and old goes.
     storage.reclaim(storage.disk()[0] * 2)
     assert not old.exists()
+
+
+def test_storage_limit_setting(client, media_dir, monkeypatch):
+    """YABBE_STORAGE_LIMIT_MB caps the data folder (no special filesystem needed)."""
+    from app import config, storage
+
+    used = storage._dir_size(config.DATA_DIR, max_age=0)
+    monkeypatch.setattr(config, "STORAGE_LIMIT_MB", used // 1024**2 + 102)  # ~2 MB above the reserve
+    storage._forget_size()
+    total, now_used, free = storage.disk()
+    assert total == config.STORAGE_LIMIT_MB * 1024**2 and abs(now_used - used) < 1024**2
+    info = client.get("/api/storage").json()
+    assert info["total"] == total
+
+    pid = client.post("/api/projects", json={"name": "limit"}).json()["id"]
+    r = client.post(f"/api/projects/{pid}/media", params={"filename": "big.mp4"}, content=b"\0" * (8 * 1024**2))
+    assert r.status_code == 507, r.text
+    storage._forget_size()
+    r = client.post(f"/api/projects/{pid}/media", params={"filename": "photo.png"},
+                    content=(media_dir / "photo.png").read_bytes())
+    assert r.status_code == 200, r.text
