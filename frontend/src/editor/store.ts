@@ -159,6 +159,10 @@ interface EditorState {
   nestSelection: () => string | null
   /** Replace a nested clip with the clips inside it. Error message or null. */
   unnest: (clipId: string) => string | null
+  /** Move the sound of the selected video clips onto audio tracks (linked). Error message or null. */
+  separateAudio: () => string | null
+  /** Give a separated video clip its sound back (removing its audio clip). */
+  restoreAudio: (clipId: string) => void
 
   // graph editor (view state; not part of the project or undo history)
   graphOpen: boolean
@@ -648,6 +652,85 @@ export const useEditor = create<EditorState>((set, get) => {
       change(() => r.doc)
       set({ selection: r.ids, transSel: null })
       return null
+    },
+
+    separateAudio: () => {
+      const { doc, selection, assets } = get()
+      const locked = new Set(doc.tracks.filter((t) => t.locked).map((t) => t.id))
+      const targets = doc.clips.filter(
+        (c) =>
+          selection.includes(c.id) &&
+          c.type === 'video' &&
+          !c.audio_detached &&
+          !locked.has(c.track_id) &&
+          assets.find((a) => a.id === c.asset_id)?.has_audio,
+      )
+      if (!targets.length) return 'Select a video clip that has sound'
+      let tracks = doc.tracks
+      const added: Clip[] = []
+      const updated = new Map<string, Clip>()
+      for (const c of targets) {
+        const all = [...doc.clips, ...added]
+        let track = tracks.find((t) => t.kind === 'audio' && !t.locked && !overlaps(all, t.id, c.start, c.duration, new Set()))
+        if (!track) {
+          const n = tracks.filter((t) => t.kind === 'audio').length + 1
+          track = { id: uid('t_'), kind: 'audio', name: `Audio ${n}`, muted: false, hidden: false, locked: false }
+          tracks = [...tracks, track]
+        }
+        // Linked, so moving / trimming / deleting one keeps the other in sync.
+        const link = c.link ?? uid('l_')
+        const { volume: volumeKeys, ...otherKeys } = c.keyframes ?? {}
+        added.push(
+          makeClip({
+            track_id: track.id,
+            type: 'audio',
+            asset_id: c.asset_id,
+            start: c.start,
+            duration: c.duration,
+            in_point: c.in_point,
+            speed: c.speed,
+            volume: c.volume,
+            muted: c.muted,
+            fade_in: c.fade_in,
+            fade_out: c.fade_out,
+            keyframes: volumeKeys ? { volume: volumeKeys } : {},
+            link,
+          }),
+        )
+        updated.set(c.id, { ...c, link, audio_detached: true, volume: 1, muted: false, fade_in: 0, fade_out: 0, keyframes: otherKeys })
+      }
+      change((d) => ({ ...d, tracks, clips: [...d.clips.map((c) => updated.get(c.id) ?? c), ...added] }))
+      set({ selection: [...targets.map((c) => c.id), ...added.map((c) => c.id)] })
+      return null
+    },
+    restoreAudio: (clipId) => {
+      const { doc } = get()
+      const clip = doc.clips.find((c) => c.id === clipId)
+      if (!clip?.audio_detached) return
+      // Its separated audio: same file, same link group.
+      const parts = doc.clips.filter((c) => c.type === 'audio' && c.asset_id === clip.asset_id && c.link && c.link === clip.link)
+      const same = parts.find(
+        (a) => Math.abs(a.start - clip.start) < 1e-6 && Math.abs(a.duration - clip.duration) < 1e-6 && Math.abs(a.in_point - clip.in_point) < 1e-6 && a.speed === clip.speed,
+      )
+      const gone = new Set(parts.map((c) => c.id))
+      const back: Clip = {
+        ...clip,
+        audio_detached: false,
+        ...(same
+          ? {
+              volume: same.volume,
+              muted: same.muted,
+              fade_in: same.fade_in,
+              fade_out: same.fade_out,
+              keyframes: { ...clip.keyframes, ...(same.keyframes?.volume ? { volume: same.keyframes.volume } : {}) },
+            }
+          : {}),
+      }
+      const rest = doc.clips.filter((c) => c.id !== clip.id && !gone.has(c.id))
+      // Drop the link if nothing else is left in the group.
+      if (back.link && !rest.some((c) => c.link === back.link)) back.link = null
+      change((d) => ({ ...d, clips: [...rest, back] }))
+      set({ selection: [clip.id] })
     },
 
     selectTransition: (clipId) => set(clipId ? { transSel: clipId, selection: [], graphSel: [] } : { transSel: null }),

@@ -582,7 +582,7 @@ def build(project: Project, win: Window, stack: tuple[str, ...] = (), transparen
         vol_frames = clip.animated("volume")
         audible = max(kf.v for kf in vol_frames) > 0 if vol_frames else clip.volume > 0
         if (
-            win.audio and not track.muted and not clip.muted and audible
+            win.audio and not track.muted and not clip.muted and audible and not clip.audio_detached
             and clip.type in ("video", "audio", "sequence") and asset is not None and asset.has_audio
         ):
             fade_in = audio_in.get(clip.id)

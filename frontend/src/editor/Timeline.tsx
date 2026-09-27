@@ -14,6 +14,7 @@ import {
   Unlink2,
   EyeOff,
   Flag,
+  AudioLines,
   Group,
   Ungroup,
   Lock,
@@ -989,7 +990,7 @@ const TimelineClip = memo(function TimelineClip({
   const bodyH = height - 4 - 16
   const roomy = bodyH >= 10 // collapsed tracks show a slim labelled bar only
   const showFilm = roomy && ready && (clip.type === 'video' || clip.type === 'image') && asset!.thumb_count > 0
-  const showWave = roomy && ready && asset!.has_audio && (clip.type === 'audio' || clip.type === 'video')
+  const showWave = roomy && ready && asset!.has_audio && (clip.type === 'audio' || (clip.type === 'video' && !clip.audio_detached))
 
   return (
     <div
@@ -1106,6 +1107,12 @@ function ClipMenu({ x, y, onClose }: { x: number; y: number; onClose: () => void
   const allOneGroup = selected.length > 1 && linkedSel.length === selected.length && new Set(linkedSel.map((c) => c.link)).size === 1
   const nestedClip = selected.length === 1 && selected[0].type === 'sequence' && selected[0].sequence_id ? selected[0] : null
   const unnestWhy = nestedClip ? unnestBlocker(s.doc, nestedClip) : null
+  const assets = useEditor((st) => st.assets)
+  const canSeparate = selected.some(
+    (c) => c.type === 'video' && !c.audio_detached && assets.find((a) => a.id === c.asset_id)?.has_audio,
+  )
+  const detachedSel = selected.filter((c) => c.audio_detached)
+  const detached = detachedSel.length === 1 ? detachedSel[0] : undefined
   return (
     <ContextMenu
       x={x}
@@ -1149,6 +1156,10 @@ function ClipMenu({ x, y, onClose }: { x: number; y: number; onClose: () => void
               },
             ]
           : []),
+        ...(canSeparate
+          ? [{ label: 'Separate audio', icon: <AudioLines size={13} />, onSelect: () => s.separateAudio() }]
+          : []),
+        ...(detached ? [{ label: 'Restore audio', icon: <Volume2 size={13} />, onSelect: () => s.restoreAudio(detached.id) }] : []),
         'divider',
         { label: 'Split at playhead', icon: <Scissors size={13} />, shortcut: 'S', onSelect: () => s.splitAtPlayhead() },
         { label: 'Duplicate', icon: <Copy size={13} />, shortcut: 'Ctrl+D', onSelect: () => s.duplicateSelected() },

@@ -197,6 +197,8 @@ export interface Clip {
   transition?: Transition | null
   /** How the picture combines with what's below it (default normal). */
   blend?: BlendMode
+  /** The sound was separated into its own audio clip: this clip is silent. */
+  audio_detached?: boolean
   /** Clips sharing a link id are selected / moved / deleted together. */
   link?: string | null
 }

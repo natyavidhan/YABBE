@@ -122,3 +122,4 @@ def test_blend_inside_nested_sequence(client, blend_project):
     im = _frame(client, pid, {"sequence_id": main["id"], "sequences": [parent, child]})
     _close(im.getpixel((160, 90)), TOP)
     _close(im.getpixel((10, 10)), BASE)
+

@@ -234,6 +234,8 @@ class Clip(_Model):
     markers: list[Marker] = Field(default_factory=list, max_length=500)
     transition: Optional[Transition] = None
     blend: BlendMode = "normal"
+    # The sound was separated into its own audio clip: this clip is silent.
+    audio_detached: bool = False
     # Clips sharing a link id are selected / moved / deleted together (editor only).
     link: Optional[str] = Field(None, max_length=40)
 

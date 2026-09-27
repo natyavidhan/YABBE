@@ -1,5 +1,6 @@
 import {
   AlignCenter,
+  AudioLines,
   AlignLeft,
   AlignRight,
   Bold,
@@ -24,6 +25,7 @@ import {
   Move,
   Timer,
   Type,
+  Undo2,
   Volume2,
   X,
 } from 'lucide-react'
@@ -200,7 +202,8 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
   const assetMap = useMemo(() => new Map(asset ? [[asset.id, asset]] : []), [asset])
   const size = sourceSize(clip, assetMap, textSizes)
   const visual = clip.type !== 'audio'
-  const hasAudio = (clip.type === 'audio' || clip.type === 'video' || clip.type === 'sequence') && (asset?.has_audio ?? false)
+  const hasAudio =
+    (clip.type === 'audio' || clip.type === 'video' || clip.type === 'sequence') && (asset?.has_audio ?? false) && !clip.audio_detached
   const scrub = { onScrubStart: beginGesture, onScrubEnd: endGesture }
   const playhead = useEditor((s) => s.playhead)
   // Animatable values shown/edited at the playhead (keyframed props auto-key).
@@ -430,6 +433,20 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
         </Section>
       )}
 
+      {clip.audio_detached && (
+        <Section icon={<Volume2 size={14} />} title="Audio">
+          <p className="text-[11px] text-faint">This clip’s sound was separated onto an audio track, so the clip itself is silent.</p>
+          <button
+            type="button"
+            disabled={locked}
+            onClick={() => useEditor.getState().restoreAudio(clip.id)}
+            className="flex h-7 items-center justify-center gap-1.5 rounded-md border border-line text-xs text-muted hover:border-line-strong hover:text-fg disabled:opacity-40"
+          >
+            <Undo2 size={12} /> Restore audio to this clip
+          </button>
+        </Section>
+      )}
+
       {hasAudio && (
         <Section
           icon={<Volume2 size={14} />}
@@ -456,6 +473,17 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
             <input type="checkbox" checked={clip.muted} onChange={(e) => set({ muted: e.target.checked })} className="accent-accent" />
             Mute this clip
           </label>
+          {clip.type === 'video' && (
+            <button
+              type="button"
+              disabled={locked}
+              onClick={() => useEditor.getState().separateAudio()}
+              className="flex h-7 items-center justify-center gap-1.5 rounded-md border border-line text-xs text-muted hover:border-line-strong hover:text-fg disabled:opacity-40"
+              title="Put the sound on its own audio clip, linked to this one"
+            >
+              <AudioLines size={12} /> Separate audio
+            </button>
+          )}
         </Section>
       )}
     </div>
