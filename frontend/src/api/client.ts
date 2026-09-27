@@ -9,6 +9,7 @@ import type {
   ProjectSummary,
   Quality,
   SequenceRenderStatus,
+  StorageInfo,
   TextStyle,
   Timeline,
   TransitionCatalog,
@@ -135,6 +136,8 @@ export const api = {
   listJobs: (projectId?: string) =>
     request<Job[]>('GET', `/api/jobs${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`),
   cancelJob: (jobId: string) => request<{ ok: boolean }>('POST', `/api/jobs/${jobId}/cancel`),
+
+  storage: () => request<StorageInfo>('GET', '/api/storage'),
 
   // transitions
   transitions: () => request<TransitionCatalog>('GET', '/api/transitions'),

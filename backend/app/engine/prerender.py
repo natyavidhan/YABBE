@@ -126,6 +126,16 @@ def target_height(project: Project, sequence_id: str, quality: str) -> int:
     return max(2, h - h % 2)
 
 
+def estimate(project: Project, sequence_id: str, quality: str) -> int:
+    """Rough size of a pre-render (lossless FFV1 with alpha: ~1 byte per pixel)."""
+    seq = project.sequence(sequence_id)
+    if seq is None:
+        return 0
+    h = target_height(project, sequence_id, quality)
+    w = seq.settings.width * h / seq.settings.height
+    return int(w * h * seq.settings.fps * seq.duration)
+
+
 def usable(project: Project, sequence_id: str, height: int, draft: bool) -> Optional[Path]:
     """A fresh pre-render of the sequence to read from, or None.
 
@@ -245,6 +255,15 @@ def render_with_dependencies(
         name = project.sequence(sid).name  # type: ignore[union-attr]
         base = lo + (hi - lo) * done / total
         part = (hi - lo) * w / total
+        try:
+            storage.ensure_space(estimate(project, sid, quality), f"pre-rendering “{name}”")
+        except storage.StorageFull:
+            if include_self:
+                raise
+            # Exports can do without: nested sequences then render as needed.
+            log.info("skipping pre-render of %s: not enough storage", sid)
+            done += w
+            continue
         ctx.progress(base, f"Pre-rendering “{name}”")
         render(project, sid, quality, ctx.job.id, lambda p, b=base, s=part: ctx.progress(b + s * p),
                lambda: ctx.cancelled)
@@ -388,6 +407,8 @@ def _auto(project_id: str) -> None:
         for dep in dependencies(project, sid) + [sid]:
             if dep not in order:
                 order.append(dep)
+    if storage.disk()[2] < storage.reserve() * 3:
+        return  # low on space: drafts are a nicety
     for sid in order:
         if sid in used and project.sequence(sid) is not None and project.sequence(sid).duration > 0:  # type: ignore[union-attr]
             try:

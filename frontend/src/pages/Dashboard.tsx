@@ -2,12 +2,12 @@ import { Copy, Download, Film, MoreHorizontal, Pencil, Plus, Trash2, Upload } fr
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
-import type { ProjectSummary } from '../api/types'
+import type { ProjectSummary, StorageInfo } from '../api/types'
 import { Logo } from '../components/Logo'
 import { ApiImg } from '../lib/apiImage'
 import { toast } from '../components/toast'
 import { Button, Field, inputClass, Modal, ProgressBar, Spinner } from '../components/ui'
-import { formatDuration, formatRelative } from '../lib/format'
+import { formatBytes, formatDuration, formatRelative } from '../lib/format'
 import { FPS_PRESETS, RESOLUTION_PRESETS } from '../lib/presets'
 
 
@@ -19,11 +19,13 @@ export default function Dashboard() {
   const fileRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
 
+  const [disk, setDisk] = useState<StorageInfo | null>(null)
   const refresh = useCallback(() => {
     api.listProjects().then(setProjects).catch((e) => {
       toast.error(e)
       setProjects([])
     })
+    api.storage().then(setDisk).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -50,6 +52,7 @@ export default function Dashboard() {
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-2 px-4 sm:gap-3 sm:px-6">
           <Logo />
           <div className="flex-1" />
+          {disk && <StorageMeter disk={disk} />}
           <input
             ref={fileRef}
             type="file"
@@ -392,5 +395,27 @@ function NewProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreat
         </div>
       </form>
     </Modal>
+  )
+}
+
+/** Disk use of the server's data folder (e.g. a shared test server's quota). */
+function StorageMeter({ disk }: { disk: StorageInfo }) {
+  const frac = disk.used / disk.total
+  const low = disk.free < disk.reserve * 2
+  return (
+    <div
+      className="hidden w-40 flex-col gap-1 sm:flex"
+      title={`${formatBytes(disk.free)} free. ${formatBytes(disk.reserve)} is kept free for previews and exports.`}
+    >
+      <div className="flex justify-between text-[11px]">
+        <span className="text-muted">Storage</span>
+        <span className={low ? 'text-danger' : 'text-faint'}>
+          {formatBytes(disk.used)} / {formatBytes(disk.total)}
+        </span>
+      </div>
+      <div className="h-1 overflow-hidden rounded-full bg-line">
+        <div className={`h-full rounded-full ${low ? 'bg-danger' : 'bg-accent'}`} style={{ width: `${Math.min(100, frac * 100)}%` }} />
+      </div>
+    </div>
   )
 }

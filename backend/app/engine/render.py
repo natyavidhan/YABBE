@@ -163,6 +163,7 @@ def segment(key: str, n: int) -> Path:
         if out.is_file():
             return out
         with _render_slots:
+            storage.reclaim(storage.reserve())
             t0 = n * session.segment
             t1 = min(session.duration, t0 + session.segment)
             k = session.height / project.settings.height

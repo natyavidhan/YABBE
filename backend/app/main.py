@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import errno
 import logging
 import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config
+from . import config, storage
 from .api import media, projects, render, transitions
 from .jobs import jobs
 
@@ -35,6 +36,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(storage.StorageFull)
+def _storage_full(_, exc: storage.StorageFull):
+    return JSONResponse({"detail": str(exc)}, status_code=507)
+
+
+@app.exception_handler(OSError)
+def _os_error(_, exc: OSError):
+    if exc.errno == errno.ENOSPC:
+        return JSONResponse({"detail": "Storage is full. Delete projects, media or exports to make room."},
+                            status_code=507)
+    raise exc
+
+
 app.include_router(projects.router)
 app.include_router(media.router)
 app.include_router(render.router)

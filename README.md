@@ -188,6 +188,7 @@ from `backend/` — it serves the built UI from `frontend/dist` on the same port
 | `YABBE_PROXY_HEIGHT` | `540` | Proxy (editing copy) resolution |
 | `YABBE_JOB_WORKERS` | `2` | Parallel background jobs (proxies, exports) |
 | `YABBE_AUTO_PRERENDER` | `1` | `0` turns off automatic draft pre-renders of nested sequences everywhere |
+| `YABBE_STORAGE_RESERVE_MB` | `100` | Free space kept for previews/renders; uploads and exports that would use it are refused with a clear message |
 | `YABBE_NESTED_CACHE_MB` | `4096` | Disk budget for live renders of nested sequence ranges |
 | `YABBE_PREVIEW_WORKERS` | `2` | Parallel preview segment renders |
 | `YABBE_STATIC_DIR` | `frontend/dist` | Built UI served by the backend |

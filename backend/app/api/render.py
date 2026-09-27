@@ -109,6 +109,9 @@ def start_export(project_id: str, options: render.ExportOptions):
                if a.status != "ready" and any(c.asset_id == a.id for c in project.clips)]
     if missing:
         raise HTTPException(409, f"Media still processing: {', '.join(missing)}")
+    h = options.height or project.settings.height
+    # ~8 Mbit/s at 1080p, scaled by resolution: a generous guess at the file size.
+    storage.ensure_space(int(project.duration * 1_000_000 * max(0.25, h / 1080)), "this export")
     record = render.new_export_record(project, options)
     job = jobs.submit("export", lambda ctx: render.run_export(ctx, project, options, record),
                       project_id=project_id, label=f"Export {record.width}×{record.height}")
@@ -171,6 +174,7 @@ def start_prerender(project_id: str, sequence_id: str, body: PrerenderRequest):
         raise HTTPException(404, "Sequence not found")
     if seq.duration <= 0:
         raise HTTPException(400, "The sequence is empty")
+    storage.ensure_space(prerender.estimate(project, sequence_id, body.quality), "this pre-render")
     return prerender.start(project_id, sequence_id, body.quality)
 
 
@@ -221,6 +225,19 @@ class MeasureResponse(BaseModel):
 def measure(style: TextStyle):
     w, h = text.measure(style)
     return MeasureResponse(width=w, height=h)
+
+
+class StorageInfo(BaseModel):
+    total: int
+    used: int
+    free: int
+    reserve: int
+
+
+@router.get("/storage", response_model=StorageInfo)
+def storage_info():
+    total, used, free = storage.disk()
+    return StorageInfo(total=total, used=used, free=free, reserve=storage.reserve())
 
 
 @router.get("/health")

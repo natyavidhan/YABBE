@@ -266,6 +266,14 @@ export interface SequenceRenderStatus {
   qualities: PrerenderQualityStatus[]
 }
 
+export interface StorageInfo {
+  total: number
+  used: number
+  free: number
+  /** Kept free for renders; uploads can't use it. */
+  reserve: number
+}
+
 export interface Job {
   id: string
   kind: string

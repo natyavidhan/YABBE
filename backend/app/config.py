@@ -46,6 +46,9 @@ AUTO_PRERENDER = os.environ.get("YABBE_AUTO_PRERENDER", "1") not in ("0", "false
 # Size limit for on-demand renders of nested sequence ranges (all projects).
 NESTED_CACHE_MB = int(os.environ.get("YABBE_NESTED_CACHE_MB", "4096"))
 PREVIEW_WORKERS = int(os.environ.get("YABBE_PREVIEW_WORKERS", "2"))
+# Free space kept for proxies, previews and renders: uploads that would eat into
+# it are refused with a clear message instead of failing half-way.
+STORAGE_RESERVE_MB = int(os.environ.get("YABBE_STORAGE_RESERVE_MB", "100"))
 
 CORS_ORIGINS = [o for o in os.environ.get("YABBE_CORS_ORIGINS", "*").split(",") if o]
 

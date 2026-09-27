@@ -32,6 +32,73 @@ class ProjectNotFound(Exception):
     pass
 
 
+class StorageFull(Exception):
+    """Not enough free disk space for what was asked."""
+
+
+# -- disk space ----------------------------------------------------------------------
+
+
+def disk() -> tuple[int, int, int]:
+    """(total, used, free) bytes of the disk holding the data directory."""
+    config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+    u = shutil.disk_usage(config.DATA_DIR)
+    return u.total, u.total - u.free, u.free
+
+
+def reserve() -> int:
+    return config.STORAGE_RESERVE_MB * 1024 * 1024
+
+
+def reclaim(want_free: int) -> int:
+    """Delete disposable files (old preview sessions, then cached nested
+    renders, oldest first) until ``want_free`` bytes are free. Returns the
+    free space afterwards. Anything written in the last minute is kept: a
+    render may be about to read it."""
+    free = disk()[2]
+    if free >= want_free:
+        return free
+    now = time.time()
+    victims: list[tuple[float, Path]] = []
+    if config.PREVIEW_DIR.is_dir():
+        for d in config.PREVIEW_DIR.iterdir():
+            marker = d / "session.json"
+            mtime = marker.stat().st_mtime if marker.exists() else 0.0
+            victims.append((mtime, d))
+    for f in config.PROJECTS_DIR.glob("*/cache/nested/*"):
+        try:
+            victims.append((f.stat().st_mtime, f))
+        except FileNotFoundError:
+            pass
+    for mtime, path in sorted(victims, key=lambda v: v[0]):
+        if now - mtime < 60:
+            continue
+        if path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)
+        else:
+            path.unlink(missing_ok=True)
+        free = disk()[2]
+        if free >= want_free:
+            break
+    return free
+
+
+def ensure_space(nbytes: int, what: str) -> None:
+    """Raise StorageFull unless ``nbytes`` fit while keeping the reserve free
+    (clearing disposable caches first if that helps)."""
+    need = nbytes + reserve()
+    if reclaim(need) < need:
+        total, used, free = disk()
+        raise StorageFull(
+            f"Not enough storage for {what}: {_mb(free)} free of {_mb(total)}. "
+            "Delete projects, media or exports to make room."
+        )
+
+
+def _mb(n: int) -> str:
+    return f"{n / 1024**3:.1f} GB" if n >= 1024**3 else f"{n / 1024**2:.0f} MB"
+
+
 def lock(project_id: str) -> threading.RLock:
     with _locks_guard:
         return _locks[project_id]

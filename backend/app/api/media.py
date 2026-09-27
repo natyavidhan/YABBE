@@ -72,6 +72,8 @@ async def upload(project_id: str, request: Request, filename: str):
     """Body: raw file bytes (streamed straight to disk). ``?filename=`` is the
     original name."""
     get_project(project_id)
+    declared = int(request.headers.get("content-length") or 0)
+    storage.ensure_space(declared, "this upload")
     asset_id = new_id("a_")
     stored = f"{asset_id}{_safe_ext(filename)}"
     dest = storage.media_dir(project_id) / stored
@@ -83,6 +85,8 @@ async def upload(project_id: str, request: Request, filename: str):
                 size += len(chunk)
                 if size > MAX_UPLOAD_BYTES:
                     raise HTTPException(413, "File too large")
+                if size > declared and size // (16 << 20) != (size - len(chunk)) // (16 << 20):
+                    storage.ensure_space(0, "this upload")  # no size given up front: check as it grows
                 fh.write(chunk)
         if size == 0:
             raise HTTPException(400, "Empty upload")
