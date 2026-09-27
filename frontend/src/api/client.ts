@@ -65,7 +65,13 @@ function uploadRaw<T>(url: string, file: Blob, onProgress?: (fraction: number) =
       if (xhr.status >= 200 && xhr.status < 300) resolve(body as T)
       else {
         const detail = (body as { detail?: unknown } | null)?.detail
-        reject(new ApiError(xhr.status, typeof detail === 'string' ? detail : `Upload failed (${xhr.status})`))
+        const message =
+          typeof detail === 'string'
+            ? detail
+            : xhr.status === 413
+              ? 'This file is too big to upload through this link (tunnels like Cloudflare allow about 100 MB per file)'
+              : `Upload failed (${xhr.status})`
+        reject(new ApiError(xhr.status, message))
       }
     }
     xhr.onerror = () => reject(new ApiError(0, 'Network error during upload'))
