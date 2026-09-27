@@ -457,6 +457,67 @@ def _audio_chain(
     return label
 
 
+# Blend mode -> (ffmpeg blend options, top layer as the first input?). FFmpeg is
+# inconsistent about which input is the "top" one, so each mode's order was
+# checked against the Photoshop formulas (tests/test_blend.py).
+BLEND_MODES: dict[str, tuple[str, bool]] = {
+    "darken": ("all_mode=darken", True),
+    "multiply": ("all_mode=multiply", True),
+    "color_burn": ("all_mode=burn", True),
+    "linear_burn": ("all_expr='max(0,A+B-255)'", True),
+    "lighten": ("all_mode=lighten", True),
+    "screen": ("all_mode=screen", True),
+    "color_dodge": ("all_mode=dodge", True),
+    "add": ("all_mode=addition", True),
+    "overlay": ("all_mode=overlay", False),
+    "soft_light": ("all_mode=softlight", False),
+    "hard_light": ("all_mode=hardlight", False),
+    "vivid_light": ("all_mode=vividlight", True),
+    "linear_light": ("all_mode=linearlight", True),
+    "pin_light": ("all_mode=pinlight", False),
+    "hard_mix": ("all_mode=hardmix", True),
+    "difference": ("all_mode=difference", True),
+    "exclusion": ("all_mode=exclusion", True),
+    "subtract": ("all_mode=subtract", False),
+    "divide": ("all_mode=divide", False),
+}
+
+
+def _blend_layer(g: Graph, n: int, current: str, label: str, name: str, ox: str, oy: str, enable: str,
+                 mode: str, fps: float, dur: float, transparent: bool) -> str:
+    """Composite a layer onto ``current`` with a blend mode; returns the output label.
+
+    The layer is placed on a full-size transparent canvas, blended with the
+    whole picture below, and the result is laid over it through the layer's
+    own alpha (so opacity, crop and shape still apply). On a transparent
+    canvas (nested sequences) the layer shows normally where nothing is
+    below it, as in After Effects.
+    """
+    opts, top_first = BLEND_MODES[mode]
+    W, H = g.width, g.height
+    fmt = "rgba" if transparent else "yuv420p"
+    extra = 1 if transparent else 0
+    g.filters.append(f"color=c=black@0:s={W}x{H}:r={_num(fps)}:d={_num(dur)},format=rgba[bc{n}]")
+    g.filters.append(
+        f"[bc{n}][{label}]{name}=x={ox}:y={oy}:format=rgb:eof_action=pass:{enable},format=gbrap,"
+        f"split={2 + extra}[bt{n}][bm{n}]{'[bk' + str(n) + ']' if transparent else ''}"
+    )
+    g.filters.append(f"[bm{n}]alphaextract[ba{n}]")
+    g.filters.append(f"[{current}]format=gbrap,split={2 + extra}[bb{n}][bo{n}]{'[bq' + str(n) + ']' if transparent else ''}")
+    pair = f"[bt{n}][bb{n}]" if top_first else f"[bb{n}][bt{n}]"
+    g.filters.append(f"{pair}blend={opts},format=gbrp[bl{n}]")
+    mixed = f"bl{n}"
+    if transparent:
+        # Where the canvas below is see-through, use the layer's own colour.
+        g.filters.append(f"[bq{n}]alphaextract,format=gbrp[bw{n}]")
+        g.filters.append(f"[bk{n}]format=gbrp[bn{n}]")
+        g.filters.append(f"[bn{n}][bl{n}][bw{n}]maskedmerge[bv{n}]")
+        mixed = f"bv{n}"
+    g.filters.append(f"[{mixed}][ba{n}]alphamerge[bx{n}]")
+    g.filters.append(f"[bo{n}][bx{n}]overlay=format=rgb:eof_action=pass,format={fmt}[ov{n}]")
+    return f"ov{n}"
+
+
 def build(project: Project, win: Window, stack: tuple[str, ...] = (), transparent: bool = False) -> Graph:
     """``stack``: sequences already being rendered further up (loop guard).
     ``transparent``: no background colour (nested sequences, like After
@@ -487,8 +548,8 @@ def build(project: Project, win: Window, stack: tuple[str, ...] = (), transparen
             audio_out[p.A.id] = (p.a, p.b)
             audio_in[p.B.id] = (p.a, p.b)
 
-    # (rank, time, overlay spec) — composited bottom track first, then by time.
-    items: list[tuple[int, float, str, str, str, str, float, float]] = []
+    # (rank, time, overlay spec, blend mode) — composited bottom track first, then by time.
+    items: list[tuple[int, float, str, str, str, str, float, float, str]] = []
     audio_labels: list[str] = []
 
     for clip in clips:
@@ -515,7 +576,7 @@ def build(project: Project, win: Window, stack: tuple[str, ...] = (), transparen
                     if layer is not None:
                         label, name, ox, oy = layer
                         items.append((-track_rank[clip.track_id], clip.start, label, name, ox, oy,
-                                      vis.offset, vis.offset + vis.length))
+                                      vis.offset, vis.offset + vis.length, clip.blend))
 
         # ---- sound (crossfades through transitions that have audio on) -------------------
         vol_frames = clip.animated("volume")
@@ -595,7 +656,8 @@ def build(project: Project, win: Window, stack: tuple[str, ...] = (), transparen
                 f"[{out}]trim=start={s0 - p.a:.6f}:end={s1 - p.a:.6f},"
                 f"setpts=PTS-STARTPTS+{s0 - win.t0:.6f}/TB[{out}w]"
             )
-            items.append((-track_rank[p.track_id], p.a, f"{out}w", "overlay", "0", "0", s0 - win.t0, s1 - win.t0))
+            items.append((-track_rank[p.track_id], p.a, f"{out}w", "overlay", "0", "0", s0 - win.t0, s1 - win.t0,
+                          p.A.blend if p.A.blend == p.B.blend else "normal"))
 
     # ---- composite video ------------------------------------------------------------
     if win.video:
@@ -608,12 +670,13 @@ def build(project: Project, win: Window, stack: tuple[str, ...] = (), transparen
         current = "base"
         blend = ":format=rgb" if transparent else ""  # keep the canvas alpha
         items.sort(key=lambda it: (it[0], it[1]))
-        for n, (_, _, label, name, ox, oy, a, b) in enumerate(items):
+        for n, (_, _, label, name, ox, oy, a, b, mode) in enumerate(items):
+            enable = f"enable='between(t,{_num(a - EPS)},{_num(b - EPS)})'"
+            if mode in BLEND_MODES:
+                current = _blend_layer(g, n, current, label, name, ox, oy, enable, mode, fps, dur, transparent)
+                continue
             out = f"ov{n}"
-            g.filters.append(
-                f"[{current}][{label}]{name}=x={ox}:y={oy}{blend}"
-                f":eof_action=pass:enable='between(t,{_num(a - EPS)},{_num(b - EPS)})'[{out}]"
-            )
+            g.filters.append(f"[{current}][{label}]{name}=x={ox}:y={oy}{blend}:eof_action=pass:{enable}[{out}]")
             current = out
         g.filters.append(f"[{current}]format={'yuva420p' if transparent else 'yuv420p'}[vout]")
 

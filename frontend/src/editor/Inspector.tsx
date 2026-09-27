@@ -29,7 +29,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api } from '../api/client'
-import type { AnimProp, Asset, Clip, Ease } from '../api/types'
+import type { AnimProp, Asset, BlendMode, Clip, Ease } from '../api/types'
 import { Button, IconButton, inputClass, NumberInput } from '../components/ui'
 import { formatDuration, formatTimecode } from '../lib/format'
 import { toast } from '../components/toast'
@@ -39,6 +39,26 @@ import { ProjectSettingsForm } from './ProjectSettings'
 import { FoldAllButton, Section } from '../components/Section'
 import { TransitionPanel } from './TransitionPanel'
 import { allSequences, clipEnd, gapAfter, sequenceAsset, MAX_SPEED, maxClipDuration, MIN_CLIP, MIN_SPEED, overlaps, speedRange, useEditor, type ClipPatch } from './store'
+
+/** Blend modes grouped like Photoshop / Premiere. */
+const BLEND_GROUPS: [string, [BlendMode, string][]][] = [
+  ['', [['normal', 'Normal']]],
+  ['Darken', [['darken', 'Darken'], ['multiply', 'Multiply'], ['color_burn', 'Color burn'], ['linear_burn', 'Linear burn']]],
+  ['Lighten', [['lighten', 'Lighten'], ['screen', 'Screen'], ['color_dodge', 'Color dodge'], ['add', 'Add (linear dodge)']]],
+  [
+    'Contrast',
+    [
+      ['overlay', 'Overlay'],
+      ['soft_light', 'Soft light'],
+      ['hard_light', 'Hard light'],
+      ['vivid_light', 'Vivid light'],
+      ['linear_light', 'Linear light'],
+      ['pin_light', 'Pin light'],
+      ['hard_mix', 'Hard mix'],
+    ],
+  ],
+  ['Compare', [['difference', 'Difference'], ['exclusion', 'Exclusion'], ['subtract', 'Subtract'], ['divide', 'Divide']]],
+]
 
 export function Inspector() {
   const transSel = useEditor((s) => s.transSel)
@@ -273,6 +293,7 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
           onReset={() =>
             set({
               transform: { x: 0, y: 0, scale: 1, rotation: 0, opacity: 1, flip_h: false, flip_v: false },
+              blend: 'normal',
               keyframes: withoutKeys(['x', 'y', 'scale', 'rotation', 'opacity']),
             })
           }
@@ -323,6 +344,32 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
             parse={(v) => v / 100}
             onChange={(opacity) => setP({ opacity })}
           />
+          <label className="flex items-center gap-2">
+            <span className="w-14 shrink-0 text-[11px] font-medium text-faint">Blend</span>
+            <select
+              value={clip.blend ?? 'normal'}
+              disabled={locked}
+              onChange={(e) => set({ blend: e.target.value as BlendMode })}
+              className={`${inputClass} h-7 min-w-0 flex-1 text-xs`}
+              aria-label="Blend mode"
+            >
+              {BLEND_GROUPS.map(([name, group]) =>
+                !name ? (
+                  <option key={group[0][0]} value={group[0][0]}>
+                    {group[0][1]}
+                  </option>
+                ) : (
+                  <optgroup key={name} label={name}>
+                    {group.map(([v, label]) => (
+                      <option key={v} value={v}>
+                        {label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ),
+              )}
+            </select>
+          </label>
           <div className="flex items-center gap-1">
             <IconButton label="Flip horizontally" active={clip.transform.flip_h} onClick={() => set({ transform: { flip_h: !clip.transform.flip_h } })}>
               <FlipHorizontal2 size={15} />

@@ -110,6 +110,14 @@ class TextStyle(_Model):
 
 
 ClipType = Literal["video", "audio", "image", "text", "sequence"]
+# How a clip's picture combines with what's below it (Photoshop / Premiere names).
+BlendMode = Literal[
+    "normal",
+    "darken", "multiply", "color_burn", "linear_burn",
+    "lighten", "screen", "color_dodge", "add",
+    "overlay", "soft_light", "hard_light", "vivid_light", "linear_light", "pin_light", "hard_mix",
+    "difference", "exclusion", "subtract", "divide",
+]
 
 
 class Transition(_Model):
@@ -225,6 +233,7 @@ class Clip(_Model):
     keyframes: dict[AnimProp, list[Keyframe]] = Field(default_factory=dict)
     markers: list[Marker] = Field(default_factory=list, max_length=500)
     transition: Optional[Transition] = None
+    blend: BlendMode = "normal"
     # Clips sharing a link id are selected / moved / deleted together (editor only).
     link: Optional[str] = Field(None, max_length=40)
 

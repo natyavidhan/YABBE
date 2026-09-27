@@ -30,6 +30,28 @@ export interface Asset {
 
 export type TrackKind = 'video' | 'audio'
 
+export type BlendMode =
+  | 'normal'
+  | 'darken'
+  | 'multiply'
+  | 'color_burn'
+  | 'linear_burn'
+  | 'lighten'
+  | 'screen'
+  | 'color_dodge'
+  | 'add'
+  | 'overlay'
+  | 'soft_light'
+  | 'hard_light'
+  | 'vivid_light'
+  | 'linear_light'
+  | 'pin_light'
+  | 'hard_mix'
+  | 'difference'
+  | 'exclusion'
+  | 'subtract'
+  | 'divide'
+
 export interface Track {
   id: string
   kind: TrackKind
@@ -173,6 +195,8 @@ export interface Clip {
   keyframes: Partial<Record<AnimProp, Keyframe[]>>
   markers: Marker[]
   transition?: Transition | null
+  /** How the picture combines with what's below it (default normal). */
+  blend?: BlendMode
   /** Clips sharing a link id are selected / moved / deleted together. */
   link?: string | null
 }
