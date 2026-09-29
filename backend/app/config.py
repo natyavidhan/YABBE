@@ -17,6 +17,9 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = _env_path("YABBE_DATA_DIR", BACKEND_DIR.parent / "data")
 PROJECTS_DIR = DATA_DIR / "projects"
 PREVIEW_DIR = DATA_DIR / "preview"
+# AI models (roto brush), kept apart from DATA_DIR so they don't count as user storage.
+MODELS_DIR = _env_path("YABBE_MODELS_DIR", BACKEND_DIR.parent / "models")
+ROTO_THREADS = int(os.environ.get("YABBE_ROTO_THREADS", "0"))  # 0 = all cores
 TMP_DIR = DATA_DIR / "tmp"
 
 # Built frontend, served by the backend in production (single container).

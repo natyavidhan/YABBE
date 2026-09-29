@@ -184,6 +184,30 @@ class Stabilize(_Model):
     auto_zoom: bool = True  # scale up just enough to hide the moving edges
 
 
+class RotoPrompt(_Model):
+    """What to select on one source frame: a box and/or clicks (normalised
+    source coordinates; label 1 = part of the object, 0 = not)."""
+
+    t: float = Field(ge=0)  # source seconds
+    box: Optional[list[float]] = Field(None, min_length=4, max_length=4)  # x0, y0, x1, y1
+    points: list[list[float]] = Field(default_factory=list, max_length=40)  # [x, y, label]
+
+
+class Roto(_Model):
+    """Roto brush: an object selected on some frames and followed through the
+    clip by EdgeTAM (engine/roto.py). The mask becomes the clip's alpha."""
+
+    enabled: bool = True
+    prompts: list[RotoPrompt] = Field(default_factory=list, max_length=50)
+    start: Optional[float] = Field(None, ge=0)  # tracked source range (None = whole source)
+    end: Optional[float] = Field(None, ge=0)
+    invert: bool = False  # keep everything except the object
+    refine: bool = True  # edge-aware refinement against the picture (hair, soft edges)
+    choke: float = Field(0.0, ge=-10, le=10)  # shrink (+) / grow (-) the matte, pixels
+    feather: float = Field(0.0, ge=0, le=20)  # soften the edge, pixels
+    matte: bool = False  # preview aid: show the matte
+
+
 class Transition(_Model):
     """Transition from this clip into the next clip that touches it on the same
     track, centred on the cut (see engine/transitions.py for the kinds)."""
@@ -303,6 +327,7 @@ class Clip(_Model):
     follow: Optional[FollowTrack] = None
     pin: Optional[PinTrack] = None
     stabilize: Optional[Stabilize] = None
+    roto: Optional[Roto] = None
     # The sound was separated into its own audio clip: this clip is silent.
     audio_detached: bool = False
     # Clips sharing a link id are selected / moved / deleted together (editor only).

@@ -56,6 +56,11 @@ def state_token(project: Project) -> str:
             for t in c.trackers:
                 k = tracking.key(asset, t)
                 parts.append(k + ("1" if tracking.result_path(project.id, k).is_file() else "0"))
+            if c.roto is not None:
+                from . import roto  # circular import
+
+                k = roto.key(asset, c.roto)
+                parts.append("r" + k + ("1" if roto.result_path(project.id, k).is_file() else "0"))
     return hashlib.sha1("|".join(parts).encode()).hexdigest()[:12] if parts else ""
 
 

@@ -475,6 +475,58 @@ def _pinned_layer(g: Graph, idx: int, chain: list[str], sendcmd_at: int, corners
     return label, f"overlay@ov{idx}", "0", "0"
 
 
+def _roto_filters(g: Graph, project: Project, clip: Clip, vis: "_Visible", pre: list[str], idx: int,
+                  size: tuple[int, int]) -> Optional[list[str]]:
+    """Roto brush matte as the clip's alpha: the cached mask video, timed like the
+    clip, scaled to the picture, refined against it (guided filter, so edges
+    follow hair and soft detail), then shrink / feather / invert."""
+    from . import roto  # circular import
+
+    r = clip.roto
+    asset = project.asset(clip.asset_id) if clip.asset_id else None
+    if r is None or not r.enabled or clip.type != "video" or asset is None:
+        return None
+    k = roto.key(asset, r)
+    meta = roto.load_meta(project.id, k)
+    if meta is None:
+        return None
+    rel = vis.src_in - meta["start"]
+    lead = max(0.0, -rel)  # source seconds before the tracked range: nothing selected there
+    m = g.add_input("-ss", _num(max(0.0, rel)), "-t", _num(vis.src_len + 2 / meta["fps"] * clip.speed + 0.1),
+                    "-i", str(roto.result_path(project.id, k)))
+    mask = [f"tpad=start_duration={lead:.4f}:color=black"] if lead > 1e-4 else []
+    fw, fh = size  # picture and mask meet at the size the (uncropped) layer is drawn at
+    mask += [f"setpts=(PTS-STARTPTS)/{_num(clip.speed)}", *pre, f"setpts=PTS+{_num(vis.offset)}/TB",
+             f"scale={fw}:{fh}:flags=bilinear", "format=gray"]
+    n = f"{idx}"
+    post = []
+    if r.choke > 0.5:
+        post += ["erosion"] * round(r.choke)
+    elif r.choke < -0.5:
+        post += ["dilation"] * round(-r.choke)
+    if r.feather > 0.1:
+        post.append(f"gblur=sigma={_num(r.feather / 2)}")
+    if r.invert:
+        post.append("negate")
+    post_s = ("," + ",".join(post)) if post else ""
+    if r.refine:
+        radius = max(2, min(20, round(fh / 270)))
+        # FFmpeg's guided filter takes the guide (the picture) first, then what it filters.
+        edge = f"[rg{n}][rm{n}]guided=radius={radius}:eps=0.02:guidance=on{post_s}[ra{n}]"
+    else:
+        edge = f"[rg{n}]nullsink;[rm{n}]null{post_s}[ra{n}]"
+    out = [
+        # format pinned first: split gives both branches one format, and the guide branch wants grey
+        f"scale={fw}:{fh},format=rgba,split=2[rv{n}][rs{n}];"
+        f"[{m}:v]{','.join(mask)}[rm{n}];"
+        f"[rs{n}]format=gray[rg{n}];"
+        f"{edge};"
+        + (f"[rv{n}]nullsink;[ra{n}]format=rgba" if r.matte else f"[rv{n}][ra{n}]alphamerge"),
+        "format=rgba",
+    ]
+    return out
+
+
 def _video_layer(
     g: Graph, project: Project, clip: Clip, vis: _Visible, win: Window, idx: int, pre: list[str],
     text_canvas: Optional[tuple[int, int]], single_frame: bool,
@@ -524,6 +576,14 @@ def _video_layer(
 
     chain = [f"setpts=(PTS-STARTPTS)/{_num(clip.speed)}", *pre, f"setpts=PTS+{_num(vis.offset)}/TB"]
     sendcmd_at = len(chain)
+    # Full (uncropped) frame at the largest size this layer is drawn at, capped at the source size.
+    src = source_size(project, clip, vis.into)
+    most = max(ss) if ss else scale0
+    full_w = min(src[0], bw * most / max(1e-6, clip.crop.width_fraction())) if src else bw
+    full_h = min(src[1], bh * most / max(1e-6, clip.crop.height_fraction())) if src else bh
+    roto_chain = _roto_filters(g, project, clip, vis, pre, idx, (_even(full_w), _even(full_h)))
+    if roto_chain:
+        chain.extend(roto_chain)
     c = clip.crop
     if not c.is_identity():
         chain.append(
@@ -555,6 +615,7 @@ def _video_layer(
     rotating = rds is not None or abs(rot0 % 360) > EPS
     needs_alpha = (
         clip.type in ("image", "text", "sequence") or op0 < 1 or bool(op_kf) or rotating or ss is not None or keyed
+        or bool(roto_chain)
     )
     if needs_alpha:
         chain.append("format=rgba")

@@ -13,3 +13,6 @@ frontend/dist/
 .DS_Store
 *.log
 .env
+
+# Exported AI models (backend/tools/export_edgetam.py)
+/models/
