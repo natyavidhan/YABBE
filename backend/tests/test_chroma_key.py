@@ -130,3 +130,11 @@ def test_key_accuracy_against_ground_truth(client, keyed, tmp_path, screen, colo
     assert err[band].mean() < 14, err[band].mean()  # was ~2x worse with a colour-distance key
     see_through = im[90, 265]
     assert all(abs(a - b) < 20 for a, b in zip(see_through, truth[90, 265])), (see_through, truth[90, 265])
+
+
+@pytest.mark.parametrize("color", ["#006428", "#0e0f11", "#808080"])
+def test_dark_or_unsaturated_screen_colours_render(client, keyed, color):
+    """A dark green screen keys; a colour that isn't a screen at all (near
+    black / grey) mustn't break rendering (it just keys nothing useful)."""
+    pid, main, gs, gsv, bg = keyed
+    _render(client, pid, main, gs, bg, {"color": color})

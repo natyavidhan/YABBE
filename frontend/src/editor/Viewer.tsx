@@ -95,6 +95,13 @@ export function Viewer({ projectId, compact = false }: { projectId: string; comp
   )
 }
 
+/** FFmpeg puts the reason last, after the whole filter graph. */
+function errorGist(error: string) {
+  const lines = error.split('\n').map((l) => l.trim()).filter(Boolean)
+  const last = lines[lines.length - 1] ?? error
+  return (lines.length > 1 ? `Render failed: ${last}` : last).slice(0, 240)
+}
+
 /** Paused view: one server-rendered JPEG, latest request wins. */
 function FrameView({ projectId, height, hidden }: { projectId: string; height: number; hidden: boolean }) {
   const doc = useEditor((s) => s.doc)
@@ -152,7 +159,10 @@ function FrameView({ projectId, height, hidden }: { projectId: string; height: n
         </div>
       )}
       {error && (
-        <div className="absolute inset-x-2 bottom-2 rounded bg-danger/80 px-2 py-1 text-xs text-white">{error}</div>
+        // FFmpeg errors can be pages long: show the gist, the rest on hover.
+        <div className="absolute inset-x-2 bottom-2 line-clamp-3 rounded bg-danger/80 px-2 py-1 text-xs break-all text-white" title={error}>
+          {errorGist(error)}
+        </div>
       )}
     </div>
   )

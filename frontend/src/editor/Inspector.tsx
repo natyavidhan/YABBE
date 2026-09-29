@@ -632,6 +632,14 @@ function KeyframeBar({ clip, disabled }: { clip: Clip; disabled?: boolean }) {
 }
 
 /** A nested sequence clip: what it shows and a way in. */
+/** Is this a usable key colour: clearly more green or blue than the other channels? */
+function isScreenColour(hex: string) {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16))
+  const p = Math.max(g, b)
+  const others = g >= b ? (r + b) / 2 : (r + g) / 2
+  return p - others >= 40
+}
+
 function ChromaKeySection({ clip, set, locked }: { clip: Clip; set: (p: ClipPatch) => void; locked: boolean }) {
   const { beginGesture, endGesture } = useEditor.getState()
   const k: ChromaKey = { ...DEFAULT_KEY, ...clip.chroma_key }
@@ -691,6 +699,12 @@ function ChromaKeySection({ clip, set, locked }: { clip: Clip; set: (p: ClipPatc
               </IconButton>
             </div>
           </Row>
+          {!isScreenColour(k.color) && (
+            <p className="rounded-md bg-warn/15 px-2 py-1.5 text-[11px] text-warn">
+              {k.color.toUpperCase()} isn’t a green or blue screen colour, so almost nothing will be removed. Use the
+              eyedropper on the screen itself (a mid-tone part of it).
+            </p>
+          )}
           <SliderRow
             label="Clip black"
             value={k.clip_black}

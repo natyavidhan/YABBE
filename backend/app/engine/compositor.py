@@ -358,7 +358,9 @@ def _key_filters(key: ChromaKey, idx: int) -> list[str]:
     p = 2 if rgb[2] > rgb[1] else 1  # primary: green (1) or blue (2)
     others = [c for c in (0, 1, 2) if c != p]
     diff = max(12.0, rgb[p] - 0.5 * (rgb[others[0]] + rgb[others[1]])) / 255
-    coef = {c: (1 / diff if c == p else -0.5 / diff) for c in (0, 1, 2)}
+    # The mixer only takes coefficients in [-2, 2], so it writes the raw
+    # difference and the LUT divides by the screen's own (any screen brightness).
+    coef = {c: (1.0 if c == p else -0.5) for c in (0, 1, 2)}
     lo, hi = key.clip_black, max(key.clip_black + 0.02, key.clip_white)
     i, k, a1, a2, a3, q, g, pm, ag, f = (f"{n}{idx}" for n in ("ki", "kk", "ka", "kb", "kc", "kq", "kg", "kp", "kn", "kf"))
     sr, sg, sb = (_num(v / 255) for v in rgb)
@@ -367,7 +369,7 @@ def _key_filters(key: ChromaKey, idx: int) -> list[str]:
         f"split=2[{i}][{k}];"
         # matte (0..1 in the alpha plane), then clip levels
         f"[{k}]colorchannelmixer=aa=0:ar={_num(coef[0])}:ag={_num(coef[1])}:ab={_num(coef[2])},"
-        f"lutrgb=a='clip((maxval-val-{_num(lo)}*maxval)/{_num(hi - lo)},0,maxval)',"
+        f"lutrgb=a='clip((maxval-val/{_num(diff)}-{_num(lo)}*maxval)/{_num(hi - lo)},0,maxval)',"
         f"alphaextract,split=3[{a1}][{a2}][{a3}];"
         # unmix: F = (I - (1 - alpha) * screen) / alpha
         f"[{a1}]negate,format=rgb24,colorchannelmixer=rr={sr}:gg={sg}:bb={sb},format=gbrp[{q}];"
