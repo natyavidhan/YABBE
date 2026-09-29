@@ -75,12 +75,14 @@ def test_key_off_matte_and_strength(client, keyed):
     matte = _render(client, pid, main, gs, bg, {"matte": True})
     assert max(matte.getpixel((20, 20))) < 30 and min(matte.getpixel((160, 90))) > 225
 
-    # No spill suppression: the green cast stays.
-    kept = _render(client, pid, main, gs, bg, {"spill": 0})
+    # A strongly green-tinted grey reads as partly screen; clip white makes it
+    # solid. Without spill suppression its cast then stays.
+    solid = {"clip_white": 0.7}
+    kept = _render(client, pid, main, gs, bg, {**solid, "spill": 0})
     g = kept.getpixel((260, 90))
     assert g[1] > max(g[0], g[2]) + 25, g
-    half = _render(client, pid, main, gs, bg, {"spill": 0.5}).getpixel((260, 90))
-    full = _render(client, pid, main, gs, bg, {"spill": 1.0}).getpixel((260, 90))
+    half = _render(client, pid, main, gs, bg, {**solid, "spill": 0.5}).getpixel((260, 90))
+    full = _render(client, pid, main, gs, bg, {**solid, "spill": 1.0}).getpixel((260, 90))
     assert g[1] - 5 > half[1] > full[1] + 5, (g, half, full)  # strength crossfades
 
 
@@ -92,3 +94,39 @@ def test_choke_shrinks_the_matte(client, keyed):
     assert min(plain) > 200 and max(choked) < 60, (plain, choked)
     soft = _render(client, pid, main, gs, bg, {"matte": True, "feather": 4}).getpixel(edge)
     assert 40 < soft[0] < 240, soft
+
+
+def _soft_shot(path, screen, w=320, h=180):
+    """Subject with a soft edge and a 50 % see-through band over ``screen``;
+    returns the true alpha and foreground colour for checking."""
+    import numpy as np
+    from PIL import ImageFilter
+
+    m = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(m).ellipse([100, 30, 220, 150], fill=255)
+    alpha = np.asarray(m.filter(ImageFilter.GaussianBlur(4)), np.float32) / 255
+    alpha[80:100, 230:300] = 0.5  # e.g. motion blur / thin fabric
+    fg = np.array([224, 172, 140], np.float32)
+    img = alpha[..., None] * fg + (1 - alpha[..., None]) * np.array(screen, np.float32)
+    Image.fromarray(img.round().astype(np.uint8)).save(path)
+    return alpha, fg
+
+
+@pytest.mark.parametrize("screen,color", [((0, 177, 64), "#00b140"), ((20, 60, 200), "#143cc8")])
+def test_key_accuracy_against_ground_truth(client, keyed, tmp_path, screen, color):
+    """Edges and see-through areas come out right: over a new background the
+    result matches the true composite (no fringe of the screen colour)."""
+    import numpy as np
+
+    pid, main, _, _, bg = keyed
+    alpha, fg = _soft_shot(tmp_path / "soft.png", screen)
+    src = _upload(client, pid, tmp_path / "soft.png")
+    _wait_ready(client, pid)
+    im = np.asarray(_render(client, pid, main, src["id"], bg, {"color": color, "spill": 0}), np.float32)
+    truth = alpha[..., None] * fg + (1 - alpha[..., None]) * np.array(BLUE, np.float32)
+    err = np.abs(im - truth).mean(-1)
+    band = (alpha > 0.05) & (alpha < 0.95)
+    assert err.mean() < 4, err.mean()
+    assert err[band].mean() < 14, err[band].mean()  # was ~2x worse with a colour-distance key
+    see_through = im[90, 265]
+    assert all(abs(a - b) < 20 for a, b in zip(see_through, truth[90, 265])), (see_through, truth[90, 265])

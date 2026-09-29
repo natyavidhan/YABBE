@@ -119,6 +119,7 @@ videos can be uploaded.
 * **Speed** — 0.25×–4× with a hold-to-repeat stepper and presets; the clip
   resizes on the timeline as you change it, or type a length in **Fit to**
   and the speed is chosen so the same footage plays in exactly that time.
+* **Chroma key** — per clip, toggleable: pick the screen colour with the eyedropper, check the matte, adjust clip black / white, spill removal, shrink and feather. A colour-difference keyer with unmixing (the approach of Keylight / Nuke's IBK), chosen after comparing options on a CPU-only machine: about half the edge error of FFmpeg's `chromakey` on a ground-truth test, and faster. AI keyers (CorridorKey) need a large GPU.
 * **Separate audio** — right-click a video clip → *Separate audio* (or the button in its Audio section) puts its sound on an audio track as its own clip, linked to the video so they move together (Alt+click selects one). *Restore audio* puts it back.
 * **Clip properties** — position, scale, rotation, opacity, blend mode (multiply, screen, overlay, soft light, difference and 15 more, matching Photoshop), flip, crop, volume (0–400 %) with fade in / out, text clips with font,
   size, colour, outline and background box.

@@ -676,8 +676,20 @@ function ChromaKeySection({ clip, set, locked }: { clip: Clip; set: (p: ClipPatc
               </IconButton>
             </div>
           </Row>
-          <SliderRow label="Similarity" value={k.similarity} {...pct} min={1} onChange={(similarity) => setKey({ similarity })} />
-          <SliderRow label="Smoothness" value={k.smoothness} {...pct} onChange={(smoothness) => setKey({ smoothness })} />
+          <SliderRow
+            label="Clip black"
+            value={k.clip_black}
+            {...pct}
+            max={95}
+            onChange={(clip_black) => setKey({ clip_black: Math.min(clip_black, k.clip_white - 0.02) })}
+          />
+          <SliderRow
+            label="Clip white"
+            value={k.clip_white}
+            {...pct}
+            min={5}
+            onChange={(clip_white) => setKey({ clip_white: Math.max(clip_white, k.clip_black + 0.02) })}
+          />
           <SliderRow label="Spill removal" value={k.spill} {...pct} onChange={(spill) => setKey({ spill })} />
           <SliderRow label="Shrink edge" value={k.choke} min={0} max={10} step={1} precision={0} suffix="px" onChange={(choke) => setKey({ choke })} />
           <SliderRow label="Feather" value={k.feather} min={0} max={10} step={0.5} precision={1} suffix="px" onChange={(feather) => setKey({ feather })} />
@@ -691,8 +703,9 @@ function ChromaKeySection({ clip, set, locked }: { clip: Clip; set: (p: ClipPatc
             Show matte (preview)
           </label>
           <p className="text-[11px] text-faint">
-            Pick the screen with <Pipette size={10} className="inline" />, raise Similarity until the screen is gone,
-            then Smoothness for softer edges. Use Show matte to check for holes.
+            Pick the screen with <Pipette size={10} className="inline" /> (a mid-tone part of it), then turn on
+            Show matte: raise Clip black until the screen is fully black, lower Clip white until the subject has
+            no grey holes. Keep them as close to 0 % / 100 % as you can, so hair and soft edges stay detailed.
           </p>
         </>
       )}

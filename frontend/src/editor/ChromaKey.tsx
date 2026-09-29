@@ -7,8 +7,8 @@ import { useEditor } from './store'
 export const DEFAULT_KEY: ChromaKey = {
   enabled: true,
   color: '#00b140',
-  similarity: 0.1,
-  smoothness: 0.05,
+  clip_black: 0.15,
+  clip_white: 0.9,
   spill: 0.6,
   choke: 0,
   feather: 0,

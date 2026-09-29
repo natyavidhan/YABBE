@@ -56,8 +56,9 @@ export interface ChromaKey {
   enabled: boolean
   /** The screen colour (#rrggbb). */
   color: string
-  similarity: number
-  smoothness: number
+  /** Matte levels: below clip_black is screen, above clip_white is solid subject. */
+  clip_black: number
+  clip_white: number
   /** Remove the screen's colour cast from the subject (0..1). */
   spill: number
   /** Shrink / soften the matte edge, in source pixels. */

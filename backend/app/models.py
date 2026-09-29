@@ -125,8 +125,10 @@ class ChromaKey(_Model):
 
     enabled: bool = True
     color: str = Field("#00b140", pattern=r"^#[0-9a-fA-F]{6}$")  # the screen colour
-    similarity: float = Field(0.10, ge=0.01, le=1)  # how far from the colour still counts as screen
-    smoothness: float = Field(0.05, ge=0, le=1)  # soft edge between keyed and kept
+    # Matte levels (Keylight's "clip black / white"): below clip_black is screen
+    # (cleans uneven lighting), above clip_white is solid subject (fills holes).
+    clip_black: float = Field(0.15, ge=0, le=0.95)
+    clip_white: float = Field(0.9, ge=0.05, le=1)
     spill: float = Field(0.6, ge=0, le=1)  # remove the screen's colour cast from the subject
     choke: float = Field(0.0, ge=0, le=10)  # shrink the matte (source pixels)
     feather: float = Field(0.0, ge=0, le=10)  # soften the matte edge (source pixels)
