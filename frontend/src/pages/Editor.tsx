@@ -18,6 +18,7 @@ import { GraphEditor } from '../editor/graph/GraphEditor'
 import { SequencesPanel, SequenceTabs } from '../editor/Sequences'
 import { RenderQueueButton, useRenderPolling, useRenders } from '../editor/Renders'
 import { useTrackingSync } from '../editor/Tracking'
+import { useRotoSync } from '../editor/Roto'
 
 export default function Editor() {
   const { projectId = '' } = useParams()
@@ -75,6 +76,7 @@ function EditorShell({ projectId }: { projectId: string }) {
   useShortcuts()
   useRenderPolling(projectId)
   useTrackingSync(projectId)
+  useRotoSync(projectId)
 
   const name = useEditor((s) => s.doc.name)
   const mobile = useIsMobile()

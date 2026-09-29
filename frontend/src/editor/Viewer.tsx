@@ -1,5 +1,6 @@
 import { KeyPicker, keyPreview, useKeyView } from './ChromaKey'
 import { TrackerOverlay } from './Tracking'
+import { RotoOverlay, rotoPreview, useRoto } from './Roto'
 import Hls from 'hls.js'
 import { Pause, Play, Route, SkipBack, SkipForward, StepBack, StepForward, Volume1, Volume2, VolumeX } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -75,6 +76,7 @@ export function Viewer({ projectId, compact = false }: { projectId: string; comp
             <Player projectId={projectId} height={Math.min(renderHeight, 720)} />
             {!playing && <TransformOverlay width={box.w} />}
             {!playing && <TrackerOverlay width={box.w} />}
+            {!playing && <RotoOverlay width={box.w} />}
             {!playing && <KeyPicker />}
           </div>
         )}
@@ -109,6 +111,8 @@ function FrameView({ projectId, height, hidden }: { projectId: string; height: n
   const playhead = useEditor((s) => s.playhead)
   const keyPick = useKeyView((s) => s.pick)
   const keyMatte = useKeyView((s) => s.matte)
+  const rotoEditing = useRoto((s) => s.editing)
+  const rotoMatte = useRoto((s) => s.matte)
   const [url, setUrl] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -122,7 +126,7 @@ function FrameView({ projectId, height, hidden }: { projectId: string; height: n
     if (hidden) return
     const fps = doc.settings.fps
     const t = Math.floor(playhead * fps + 1e-6) / fps
-    const timeline = keyPreview(timelineOf(doc), keyPick, keyMatte)
+    const timeline = rotoPreview(keyPreview(timelineOf(doc), keyPick, keyMatte), rotoEditing, rotoMatte)
     const run = async () => {
       inflight.current = true
       setBusy(true)
@@ -146,7 +150,7 @@ function FrameView({ projectId, height, hidden }: { projectId: string; height: n
     }
     if (inflight.current) wanted.current = run
     else run()
-  }, [doc, playhead, height, projectId, hidden, assetKey, keyPick, keyMatte])
+  }, [doc, playhead, height, projectId, hidden, assetKey, keyPick, keyMatte, rotoEditing, rotoMatte])
 
   useEffect(() => () => setUrl((prev) => (prev && URL.revokeObjectURL(prev), null)), [])
 

@@ -114,6 +114,34 @@ export interface TrackData {
   ref?: number
 }
 
+/** Roto brush selection on one source frame (normalised source coordinates). */
+export interface RotoPrompt {
+  t: number
+  box: [number, number, number, number] | null
+  /** [x, y, label]: 1 = part of the object, 0 = not. */
+  points: [number, number, number][]
+}
+
+export interface Roto {
+  enabled: boolean
+  prompts: RotoPrompt[]
+  start: number | null
+  end: number | null
+  invert: boolean
+  refine: boolean
+  choke: number
+  feather: number
+  matte?: boolean
+}
+
+export interface RotoStatus {
+  clip_id: string
+  key: string
+  state: 'done' | 'tracking' | 'queued' | 'error' | 'none'
+  progress: number
+  error: string | null
+}
+
 export interface ChromaKey {
   enabled: boolean
   /** The screen colour (#rrggbb). */
@@ -282,6 +310,7 @@ export interface Clip {
   follow?: FollowTrack | null
   pin?: PinTrack | null
   stabilize?: Stabilize | null
+  roto?: Roto | null
   /** Clips sharing a link id are selected / moved / deleted together. */
   link?: string | null
 }

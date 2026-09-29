@@ -119,6 +119,7 @@ videos can be uploaded.
 * **Speed** — 0.25×–4× with a hold-to-repeat stepper and presets; the clip
   resizes on the timeline as you change it, or type a length in **Fit to**
   and the speed is chosen so the same footage plays in exactly that time.
+* **Roto brush** — cut a person or any object out of a video clip, like After Effects' Roto Brush: drag a box around it (or click it; Alt-click to exclude parts) on one frame, press Done, and it's followed through the clip in the background. Fix any frame where it slips and it re-tracks with that frame as an anchor. Keep or remove the object, refine edges (hair, fur), shrink / grow, feather, matte view. Runs Meta's EdgeTAM on the CPU with ONNX Runtime (~1.3 s per frame on a dual-core i3), chosen after benchmarking the SAM 2 family on CPU-only hardware.
 * **Motion tracking** — on video clips, like After Effects' Tracker panel: *Position* (one point), *Position, rotation & scale*, *Corner pin* (a flat surface in perspective — screen / sign replacement) and *Stabilize* (smooth the camera move or lock it, optional rotation / scale, auto zoom to hide edges). Place the region on the preview and press Track; then make any clip follow it or pin a clip onto the surface. Tracking runs in the background on the server (fast: preview size; precise: the original up to 1080p), is sub-pixel on ground-truth tests, and results are cached per tracker settings — changing what follows, smoothness etc. never re-tracks, editing a region re-tracks automatically.
 * **Chroma key** — per clip, toggleable: pick the screen colour with the eyedropper, check the matte, adjust clip black / white, spill removal, shrink and feather. A colour-difference keyer with unmixing (the approach of Keylight / Nuke's IBK), chosen after comparing options on a CPU-only machine: about half the edge error of FFmpeg's `chromakey` on a ground-truth test, and faster. AI keyers (CorridorKey) need a large GPU.
 * **Separate audio** — right-click a video clip → *Separate audio* (or the button in its Audio section) puts its sound on an audio track as its own clip, linked to the video so they move together (Alt+click selects one). *Restore audio* puts it back.
@@ -191,6 +192,8 @@ from `backend/` — it serves the built UI from `frontend/dist` on the same port
 | `YABBE_PROXY_HEIGHT` | `540` | Proxy (editing copy) resolution |
 | `YABBE_JOB_WORKERS` | `2` | Parallel background jobs (proxies, exports) |
 | `YABBE_AUTO_PRERENDER` | `1` | `0` turns off automatic draft pre-renders of nested sequences everywhere |
+| `YABBE_MODELS_DIR` | `models/` (`/app/models` in Docker) | Where the roto brush model lives; the Docker image builds it in. Locally: `backend/tools/export_edgetam.py` |
+| `YABBE_ROTO_THREADS` | all cores | CPU threads for the roto brush |
 | `YABBE_STORAGE_LIMIT_MB` | `0` | Cap on the data folder (e.g. `1024` for a 1 GB test server); the dashboard shows usage against it |
 | `YABBE_STORAGE_RESERVE_MB` | `100` | Free space kept for previews/renders; uploads and exports that would use it are refused with a clear message |
 | `YABBE_NESTED_CACHE_MB` | `4096` | Disk budget for live renders of nested sequence ranges |
@@ -200,3 +203,8 @@ from `backend/` — it serves the built UI from `frontend/dist` on the same port
 
 Run a single server process: background jobs (proxies, exports) are tracked in
 memory, so don't start uvicorn with multiple workers.
+
+## Third-party models
+
+The roto brush uses [EdgeTAM](https://github.com/facebookresearch/EdgeTAM) by Meta (Apache License 2.0),
+exported to ONNX at build time; its licence is included next to the model files.

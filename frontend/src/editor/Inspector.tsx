@@ -40,6 +40,7 @@ import { fillScale, sourceSize } from './geometry'
 import { allKeyTimes, EASES, framesOf, keyIndexAt, localTime, MARKER_COLORS, propAt, textStyleAt, visibleMarkers } from './keyframes'
 import { ProjectSettingsForm } from './ProjectSettings'
 import { MotionTrackingSection } from './Tracking'
+import { RotoSection } from './Roto'
 import { DEFAULT_KEY, useKeyView } from './ChromaKey'
 import { FoldAllButton, Section } from '../components/Section'
 import { TransitionPanel } from './TransitionPanel'
@@ -451,6 +452,8 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
       {(clip.type === 'video' || clip.type === 'image' || clip.type === 'sequence') && (
         <ChromaKeySection clip={clip} set={set} locked={locked} />
       )}
+
+      {clip.type === 'video' && asset && <RotoSection clip={clip} asset={asset} locked={locked} />}
 
       {clip.type === 'video' && asset && <MotionTrackingSection clip={clip} asset={asset} locked={locked} />}
 

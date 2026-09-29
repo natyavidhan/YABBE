@@ -9,6 +9,9 @@ import type {
   ProjectSummary,
   Quality,
   SequenceRenderStatus,
+  Roto,
+  RotoPrompt,
+  RotoStatus,
   StorageInfo,
   Tracker,
   TrackData,
@@ -145,6 +148,23 @@ export const api = {
   listJobs: (projectId?: string) =>
     request<Job[]>('GET', `/api/jobs${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`),
   cancelJob: (jobId: string) => request<{ ok: boolean }>('POST', `/api/jobs/${jobId}/cancel`),
+
+  // roto brush
+  rotoInfo: () => request<{ available: boolean }>('GET', '/api/roto/info'),
+  async rotoPreview(id: string, assetId: string, prompt: RotoPrompt, signal?: AbortSignal): Promise<Blob> {
+    const res = await fetch(`${p(id)}/roto/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ asset_id: assetId, prompt }),
+      signal,
+    })
+    if (!res.ok) throw await errorFrom(res)
+    return res.blob()
+  },
+  rotoRun: (id: string, item: { clip_id: string; asset_id: string; roto: Roto }) =>
+    request<RotoStatus>('POST', `${p(id)}/roto/run`, item),
+  rotoStatus: (id: string, items: { clip_id: string; asset_id: string; roto: Roto }[]) =>
+    request<RotoStatus[]>('POST', `${p(id)}/roto/status`, items),
 
   // motion tracking
   trackingStatus: (id: string, items: { asset_id: string; tracker: Tracker }[]) =>
