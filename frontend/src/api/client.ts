@@ -10,6 +10,9 @@ import type {
   Quality,
   SequenceRenderStatus,
   StorageInfo,
+  Tracker,
+  TrackData,
+  TrackStatus,
   TextStyle,
   Timeline,
   TransitionCatalog,
@@ -142,6 +145,13 @@ export const api = {
   listJobs: (projectId?: string) =>
     request<Job[]>('GET', `/api/jobs${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`),
   cancelJob: (jobId: string) => request<{ ok: boolean }>('POST', `/api/jobs/${jobId}/cancel`),
+
+  // motion tracking
+  trackingStatus: (id: string, items: { asset_id: string; tracker: Tracker }[]) =>
+    request<TrackStatus[]>('POST', `${p(id)}/tracking/status`, items),
+  trackingRun: (id: string, item: { asset_id: string; tracker: Tracker }) =>
+    request<TrackStatus>('POST', `${p(id)}/tracking/run`, item),
+  trackingResult: (id: string, key: string) => request<TrackData>('GET', `${p(id)}/tracking/result/${key}`),
 
   storage: () => request<StorageInfo>('GET', '/api/storage'),
 

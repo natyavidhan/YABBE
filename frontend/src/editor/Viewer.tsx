@@ -1,4 +1,5 @@
 import { KeyPicker, keyPreview, useKeyView } from './ChromaKey'
+import { TrackerOverlay } from './Tracking'
 import Hls from 'hls.js'
 import { Pause, Play, Route, SkipBack, SkipForward, StepBack, StepForward, Volume1, Volume2, VolumeX } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -73,6 +74,7 @@ export function Viewer({ projectId, compact = false }: { projectId: string; comp
             <FrameView projectId={projectId} height={renderHeight} hidden={playing} />
             <Player projectId={projectId} height={Math.min(renderHeight, 720)} />
             {!playing && <TransformOverlay width={box.w} />}
+            {!playing && <TrackerOverlay width={box.w} />}
             {!playing && <KeyPicker />}
           </div>
         )}

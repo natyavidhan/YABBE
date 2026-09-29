@@ -25,11 +25,11 @@ from . import compositor, ffmpeg, prerender
 def timeline_key(project: Project) -> str:
     """Hash of everything that affects the rendered output of the project's
     current (main / viewed) sequence."""
-    from . import nested
+    from . import nested, trackapply
 
     payload = project.id + nested.sequence_key(project, project.main_sequence_id) + project.model_dump_json(
         include={"assets"}
-    )
+    ) + trackapply.state_token(project)
     return hashlib.sha1(payload.encode()).hexdigest()[:16]
 
 

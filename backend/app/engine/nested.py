@@ -46,6 +46,9 @@ def sequence_key(project: Project, sequence_id: str, _stack: tuple[str, ...] = (
     used_assets = {c.asset_id for c in seq.clips if c.asset_id}
     parts += [a.model_dump_json(include={"id", "status", "duration", "width", "height", "has_audio"})
               for a in project.assets if a.id in used_assets]
+    from . import trackapply  # circular import
+
+    parts.append(trackapply.state_token(project))
     for child in sorted(project.nested_in(sequence_id)):
         parts.append(child + ":" + sequence_key(project, child, _stack + (sequence_id,)))
     return hashlib.sha1("|".join(parts).encode()).hexdigest()[:20]

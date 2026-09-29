@@ -23,7 +23,7 @@ from typing import Optional
 
 from .. import config
 from ..models import Asset, ChromaKey, Clip, Keyframe, Project
-from . import keyframes, media, nested, prerender, text, transitions
+from . import keyframes, media, nested, prerender, text, trackapply, transitions
 from .cmdfile import Commands as _Commands
 
 EPS = 1e-6
@@ -62,7 +62,16 @@ class Graph:
     def args(self) -> list[str]:
         out = list(self.inputs)
         if self.filters:
-            out += ["-filter_complex", ";".join(self.filters)]
+            graph = ";".join(self.filters)
+            if len(graph) > 60_000:  # one argument may not exceed 128 KB: pass a file instead
+                d = config.DATA_DIR / "cache" / "cmd"
+                d.mkdir(parents=True, exist_ok=True)
+                path = d / (hashlib.sha1(graph.encode()).hexdigest()[:20] + ".graph")
+                if not path.is_file():
+                    path.write_text(graph)
+                out += ["-/filter_complex", str(path)]
+            else:
+                out += ["-filter_complex", graph]
         if self.has_video:
             out += ["-map", "[vout]"]
         if self.has_audio:
@@ -392,6 +401,78 @@ def _key_filters(key: ChromaKey, idx: int) -> list[str]:
     return out
 
 
+def _ramp_expr(values: list[float], tol: float = 0.05) -> str:
+    """A per-frame series as a compact FFmpeg expression of the frame number
+    ``in``: piecewise-linear knots (Ramer-Douglas-Peucker, within ``tol``)
+    written as a flat sum of ramps (no deep nesting)."""
+    n = len(values)
+    keep = {0, n - 1}
+    stack = [(0, n - 1)]
+    while stack:
+        a, b = stack.pop()
+        if b - a < 2:
+            continue
+        va, vb = values[a], values[b]
+        worst, at = 0.0, -1
+        for i in range(a + 1, b):
+            d = abs(values[i] - (va + (vb - va) * (i - a) / (b - a)))
+            if d > worst:
+                worst, at = d, i
+        if worst > tol:
+            keep.add(at)
+            stack += [(a, at), (at, b)]
+    knots = sorted(keep)
+    expr = f"{values[0]:.3f}"
+    for a, b in zip(knots, knots[1:]):
+        slope = (values[b] - values[a]) / (b - a)
+        if abs(slope) > 1e-9:
+            expr += f"{slope:+.5f}*clip(in-{a},0,{b - a})"
+    return expr
+
+
+def _pinned_layer(g: Graph, idx: int, chain: list[str], sendcmd_at: int, corners: list, win: "Window", fps: float,
+                  op0: float, op_kf, sample, cmds: "_Commands", label: str) -> tuple[str, str, str, str]:
+    """Corner pin: the (cropped / keyed) picture stretched onto the tracked
+    quad, per frame, on a canvas-sized transparent layer placed at 0,0."""
+    import cv2  # only needed here
+    import numpy as np
+
+    W, H = g.width, g.height
+    k = win.scale
+    # The picture fills [2, W-2] x [2, H-2] of a W x H frame with a transparent
+    # border, so the edges perspective() repeats outside the quad are clear.
+    inner = np.float32([[2, 2], [W - 2, 2], [W - 2, H - 2], [2, H - 2]])
+    outer = np.float32([[0, 0], [W, 0], [W, H], [0, H]]).reshape(-1, 1, 2)
+    series: list[list[float]] = [[] for _ in range(8)]
+    for quad in corners:
+        dst = np.float32([[x * k, y * k] for x, y in quad])
+        Hm = cv2.getPerspectiveTransform(inner, dst)
+        pts = cv2.perspectiveTransform(outer, Hm).reshape(-1, 2)
+        # FFmpeg's corner order: top-left, top-right, bottom-left, bottom-right.
+        for j, p in enumerate((pts[0], pts[1], pts[3], pts[2])):
+            series[2 * j].append(float(p[0]))
+            series[2 * j + 1].append(float(p[1]))
+    names = ["x0", "y0", "x1", "y1", "x2", "y2", "x3", "y3"]
+    persp = ":".join(f"{nm}='{_ramp_expr(vals)}'" for nm, vals in zip(names, series))
+    chain += [
+        "format=rgba", f"scale={W - 4}:{H - 4}", "pad=w=iw+4:h=ih+4:x=2:y=2:color=black@0",
+        f"fps={_num(fps)}",  # one frame per output frame, so ``in`` counts them
+        f"perspective={persp}:sense=destination:eval=frame:interpolation=linear",
+        "format=rgba",
+    ]
+    if op_kf:
+        ops = [min(1.0, max(0.0, v)) for v in sample(op_kf)]
+        cmds.add(f"colorchannelmixer@op{idx}", "aa", [f"{v:.4f}" for v in ops])
+        chain.append(f"colorchannelmixer@op{idx}=aa={ops[0]:.4f}")
+    elif op0 < 1:
+        chain.append(f"colorchannelmixer=aa={_num(op0)}")
+    cmd_file = cmds.write()
+    if cmd_file is not None:
+        chain.insert(sendcmd_at, f"sendcmd=f='{cmd_file}'")
+    g.filters.append(f"[{idx}:v]{','.join(chain)}[{label}]")
+    return label, f"overlay@ov{idx}", "0", "0"
+
+
 def _video_layer(
     g: Graph, project: Project, clip: Clip, vis: _Visible, win: Window, idx: int, pre: list[str],
     text_canvas: Optional[tuple[int, int]], single_frame: bool,
@@ -415,6 +496,29 @@ def _video_layer(
     n = max(1, math.ceil(vis.length * fps)) + 1
     sample = lambda fr: keyframes.samples(fr, vis.into, n, fps)  # noqa: E731
     cmds = _Commands(vis.offset, fps)
+    us = [vis.into + i / fps for i in range(n)]
+
+    # Per-frame values (None = constant): keyframes, plus motion from trackers.
+    xs = sample(x_kf) if x_kf else None
+    ys = sample(y_kf) if y_kf else None
+    ss = sample(scale_kf) if scale_kf else None
+    rds = sample(rot_kf) if rot_kf else None
+    for m in (trackapply.follow_offsets(project, clip, us), trackapply.stabilize_offsets(project, clip, us)):
+        if not m:
+            continue
+        if any(abs(v) > 1e-6 for v in m["dx"] + m["dy"]):
+            xs = [(xs[i] if xs else x0) + m["dx"][i] for i in range(n)]
+            ys = [(ys[i] if ys else y0) + m["dy"][i] for i in range(n)]
+        if any(abs(v) > 1e-6 for v in m["drot"]):
+            rds = [(rds[i] if rds else rot0) + m["drot"][i] for i in range(n)]
+        if any(abs(v - 1) > 1e-6 for v in m["dscale"]):
+            ss = [(ss[i] if ss else scale0) * m["dscale"][i] for i in range(n)]
+    if single_frame:  # a still: plain values, no per-frame commands
+        x0, y0 = (xs[0] if xs else x0), (ys[0] if ys else y0)
+        scale0, rot0 = (ss[0] if ss else scale0), (rds[0] if rds else rot0)
+        xs = ys = ss = rds = None
+
+    corners = trackapply.pin_corners(project, clip, us)
 
     chain = [f"setpts=(PTS-STARTPTS)/{_num(clip.speed)}", *pre, f"setpts=PTS+{_num(vis.offset)}/TB"]
     sendcmd_at = len(chain)
@@ -428,11 +532,13 @@ def _video_layer(
     keyed = key is not None and key.enabled and clip.type in ("video", "image", "sequence")
     if keyed:
         chain.extend(_key_filters(key, idx))  # type: ignore[arg-type]
+    if corners is not None:
+        return _pinned_layer(g, idx, chain, sendcmd_at, corners, win, fps, op0, op_kf, sample, cmds, label)
     tr = clip.transform
-    if scale_kf:
+    if ss is not None:
         # Animated size, padded onto a fixed transparent canvas so the overlay
         # always receives frames of one size.
-        ss = [max(0.001, v) for v in sample(scale_kf)]
+        ss = [max(0.001, v) for v in ss]
         lw, lh = _even(bw * max(ss)), _even(bh * max(ss))
         cmds.add(f"scale@s{idx}", "w", [str(_even(bw * v)) for v in ss])
         cmds.add(f"scale@s{idx}", "h", [str(_even(bh * v)) for v in ss])
@@ -444,13 +550,13 @@ def _video_layer(
         chain.append("hflip")
     if tr.flip_v:
         chain.append("vflip")
-    rotating = bool(rot_kf) or abs(rot0 % 360) > EPS
+    rotating = rds is not None or abs(rot0 % 360) > EPS
     needs_alpha = (
-        clip.type in ("image", "text", "sequence") or op0 < 1 or bool(op_kf) or rotating or bool(scale_kf) or keyed
+        clip.type in ("image", "text", "sequence") or op0 < 1 or bool(op_kf) or rotating or ss is not None or keyed
     )
     if needs_alpha:
         chain.append("format=rgba")
-    if scale_kf:
+    if ss is not None:
         chain.append(f"pad=w={lw}:h={lh}:x=(ow-iw)/2:y=(oh-ih)/2:color=black@0:eval=frame")
     if op_kf:
         ops = [min(1.0, max(0.0, v)) for v in sample(op_kf)]
@@ -458,19 +564,19 @@ def _video_layer(
         chain.append(f"colorchannelmixer@op{idx}=aa={ops[0]:.4f}")
     elif op0 < 1:
         chain.append(f"colorchannelmixer=aa={_num(op0)}")
-    if rot_kf:
+    if rds is not None:
         side = _even(math.hypot(lw, lh)) + 2
-        rs = [math.radians(v) for v in sample(rot_kf)]
+        rs = [math.radians(v) for v in rds]
         cmds.add(f"rotate@r{idx}", "a", [f"{v:.5f}" for v in rs])
         chain.append(f"rotate@r{idx}=a={rs[0]:.5f}:c=0x00000000:ow={side}:oh={side}")
     elif rotating:
         rad = _num(math.radians(rot0))
         chain.append(f"rotate={rad}:c=0x00000000:ow=rotw({rad}):oh=roth({rad})")
     W2, H2 = st.width / 2, st.height / 2
-    if x_kf:
-        cmds.add(f"overlay@ov{idx}", "x", [f"{(W2 + v) * k:.2f}-w/2" for v in sample(x_kf)])
-    if y_kf:
-        cmds.add(f"overlay@ov{idx}", "y", [f"{(H2 + v) * k:.2f}-h/2" for v in sample(y_kf)])
+    if xs is not None:
+        cmds.add(f"overlay@ov{idx}", "x", [f"{(W2 + v) * k:.2f}-w/2" for v in xs])
+    if ys is not None:
+        cmds.add(f"overlay@ov{idx}", "y", [f"{(H2 + v) * k:.2f}-h/2" for v in ys])
     ox = f"{(W2 + x0) * k:.2f}-w/2"
     oy = f"{(H2 + y0) * k:.2f}-h/2"
     cmd_file = cmds.write()

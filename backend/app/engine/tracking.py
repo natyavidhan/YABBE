@@ -369,8 +369,8 @@ def run(project_id: str, asset: Asset, tracker: Tracker, on_progress: Callable[[
             c = np.array([w / 2, h / 2, 1.0])
             moved = M @ c
             times.append(start + i / fps)
-            records.append([round((moved[0] - c[0]) / w, 6), round((moved[1] - c[1]) / h, 6),
-                            round(math.degrees(a), 4), round(s, 6)])
+            records.append([round(float(moved[0] - c[0]) / w, 6), round(float(moved[1] - c[1]) / h, 6),
+                            round(math.degrees(float(a)), 4), round(float(s), 6)])
         data = {"kind": "stabilize", "fps": fps, "times": times, "path": records, "size": [w, h]}
     else:
         if tracker.kind == "corner_pin":
@@ -392,18 +392,19 @@ def run(project_id: str, asset: Asset, tracker: Tracker, on_progress: Callable[[
                             total, tick)
         back = _track_region(_frames_backward(project_id, asset, tracker.quality, start, ref + 1 / fps, fps),
                              make(), total, tick)
-        seq = [(ref - i / fps, m, c) for i, (m, c) in enumerate(back)][1:][::-1]
+        seq = [(ref - i / fps, m, c) for i, (m, c) in enumerate(back)][1:][::-1]  # skip the shared ref frame
         seq += [(ref + i / fps, m, c) for i, (m, c) in enumerate(fwd)]
         for t, M, conf in seq:
             times.append(round(t, 6))
             if tracker.kind == "corner_pin":
                 q = _apply(M, quad.reshape(-1, 1, 2)).reshape(-1, 2)
-                records.append([round(v, 6) for p in q for v in (p[0] / w, p[1] / h)] + [round(conf, 3)])
+                records.append([round(float(v), 6) for p in q for v in (p[0] / w, p[1] / h)] + [round(float(conf), 3)])
             else:
                 c = _apply(M, np.array([[box[:2]]], np.float32)).reshape(2)
                 a = math.degrees(math.atan2(M[1, 0], M[0, 0]))
                 s = math.hypot(M[0, 0], M[1, 0])
-                records.append([round(c[0] / w, 6), round(c[1] / h, 6), round(a, 4), round(s, 6), round(conf, 3)])
+                records.append([round(float(c[0]) / w, 6), round(float(c[1]) / h, 6), round(float(a), 4),
+                                round(float(s), 6), round(float(conf), 3)])
         data = {"kind": tracker.kind, "fps": fps, "times": times, "samples": records, "ref": ref, "size": [w, h]}
     _save(project_id, k, data)
     with _cache_lock:

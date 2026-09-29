@@ -52,6 +52,68 @@ export type BlendMode =
   | 'subtract'
   | 'divide'
 
+export type TrackerKind = 'point' | 'transform' | 'corner_pin' | 'stabilize'
+
+/** A motion tracker on a video clip. Coordinates are normalised to the source
+ * frame (0..1), times are source seconds. */
+export interface Tracker {
+  id: string
+  name: string
+  kind: TrackerKind
+  /** Source time the region was placed on. */
+  ref: number
+  /** cx, cy, w, h (point / transform). */
+  box: [number, number, number, number]
+  /** Corner pin: top-left, top-right, bottom-right, bottom-left. */
+  quad: [number, number][]
+  start: number | null
+  end: number | null
+  quality: 'fast' | 'precise'
+}
+
+export interface FollowTrack {
+  clip_id: string
+  tracker_id: string
+  position: boolean
+  rotation: boolean
+  scale: boolean
+}
+
+export interface PinTrack {
+  clip_id: string
+  tracker_id: string
+}
+
+export interface Stabilize {
+  tracker_id: string
+  mode: 'smooth' | 'lock'
+  smoothness: number
+  rotation: boolean
+  scale: boolean
+  auto_zoom: boolean
+}
+
+export interface TrackStatus {
+  tracker_id: string
+  key: string
+  state: 'done' | 'tracking' | 'queued' | 'error' | 'none'
+  progress: number
+  error: string | null
+  job_id: string | null
+}
+
+/** Tracking result (engine/tracking.py). */
+export interface TrackData {
+  kind: TrackerKind
+  fps: number
+  times: number[]
+  /** point / transform: [x, y, deg, scale, confidence]; corner pin: 4 x (x, y) + confidence. */
+  samples?: number[][]
+  /** stabilize: [dx, dy, deg, scale] per frame. */
+  path?: number[][]
+  ref?: number
+}
+
 export interface ChromaKey {
   enabled: boolean
   /** The screen colour (#rrggbb). */
@@ -216,6 +278,10 @@ export interface Clip {
   /** The sound was separated into its own audio clip: this clip is silent. */
   audio_detached?: boolean
   chroma_key?: ChromaKey | null
+  trackers?: Tracker[]
+  follow?: FollowTrack | null
+  pin?: PinTrack | null
+  stabilize?: Stabilize | null
   /** Clips sharing a link id are selected / moved / deleted together. */
   link?: string | null
 }

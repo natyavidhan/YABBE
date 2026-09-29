@@ -39,6 +39,7 @@ import { toast } from '../components/toast'
 import { fillScale, sourceSize } from './geometry'
 import { allKeyTimes, EASES, framesOf, keyIndexAt, localTime, MARKER_COLORS, propAt, textStyleAt, visibleMarkers } from './keyframes'
 import { ProjectSettingsForm } from './ProjectSettings'
+import { MotionTrackingSection } from './Tracking'
 import { DEFAULT_KEY, useKeyView } from './ChromaKey'
 import { FoldAllButton, Section } from '../components/Section'
 import { TransitionPanel } from './TransitionPanel'
@@ -303,6 +304,18 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
             })
           }
         >
+          {(clip.follow || clip.pin) && (
+            <div className="flex items-center gap-2 rounded-md bg-accent/10 px-2 py-1.5 text-[11px] text-muted">
+              <span className="flex-1">
+                {clip.pin
+                  ? 'Corner-pinned to a tracked surface: position, scale and rotation are ignored.'
+                  : 'Moves with a tracker: the values below place it at the tracker’s reference frame.'}
+              </span>
+              <button type="button" className="text-fg" disabled={locked} onClick={() => set(clip.pin ? { pin: null } : { follow: null })}>
+                {clip.pin ? 'Unpin' : 'Detach'}
+              </button>
+            </div>
+          )}
           <KeyframeBar clip={clip} disabled={locked} />
           <div className="grid grid-cols-2 gap-2">
             {withKey('x', <NumberInput label="X" value={val('x')} onChange={(x) => setP({ x })} step={1} precision={0} suffix="px" {...scrub} />)}
@@ -438,6 +451,8 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
       {(clip.type === 'video' || clip.type === 'image' || clip.type === 'sequence') && (
         <ChromaKeySection clip={clip} set={set} locked={locked} />
       )}
+
+      {clip.type === 'video' && asset && <MotionTrackingSection clip={clip} asset={asset} locked={locked} />}
 
       {clip.audio_detached && (
         <Section icon={<Volume2 size={14} />} title="Audio">
