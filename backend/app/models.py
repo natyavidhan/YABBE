@@ -135,6 +135,55 @@ class ChromaKey(_Model):
     matte: bool = False  # show the matte (black/white) instead; preview aid, not saved by the editor
 
 
+TrackerKind = Literal["point", "transform", "corner_pin", "stabilize"]
+
+
+class Tracker(_Model):
+    """A motion tracker on a video clip (engine/tracking.py). Coordinates are
+    normalised to the source frame (0..1); times are source seconds. The result
+    is stored separately, keyed by these settings, so it's reused until they change."""
+
+    id: str = Field(default_factory=lambda: new_id("k_"))
+    name: str = Field("", max_length=80)
+    kind: TrackerKind
+    ref: float = Field(0.0, ge=0)  # frame the region was placed on
+    box: list[float] = Field(default_factory=lambda: [0.5, 0.5, 0.08, 0.08], min_length=4, max_length=4)  # cx, cy, w, h
+    quad: list[list[float]] = Field(  # corner pin: top-left, top-right, bottom-right, bottom-left
+        default_factory=lambda: [[0.35, 0.35], [0.65, 0.35], [0.65, 0.65], [0.35, 0.65]], min_length=4, max_length=4
+    )
+    start: Optional[float] = Field(None, ge=0)  # range to track (source seconds); None = whole source
+    end: Optional[float] = Field(None, ge=0)
+    quality: Literal["fast", "precise"] = "fast"  # analyse the proxy, or the original up to 1080p
+
+
+class FollowTrack(_Model):
+    """This clip moves with a point / transform tracker (After Effects' "apply to layer")."""
+
+    clip_id: str
+    tracker_id: str
+    position: bool = True
+    rotation: bool = False
+    scale: bool = False
+
+
+class PinTrack(_Model):
+    """This clip is corner-pinned onto a corner-pin tracker's surface."""
+
+    clip_id: str
+    tracker_id: str
+
+
+class Stabilize(_Model):
+    """Remove camera shake using a stabilize tracker on the same clip."""
+
+    tracker_id: str
+    mode: Literal["smooth", "lock"] = "smooth"
+    smoothness: float = Field(1.0, ge=0.05, le=10)  # seconds of motion averaged (smooth mode)
+    rotation: bool = True
+    scale: bool = False
+    auto_zoom: bool = True  # scale up just enough to hide the moving edges
+
+
 class Transition(_Model):
     """Transition from this clip into the next clip that touches it on the same
     track, centred on the cut (see engine/transitions.py for the kinds)."""
@@ -250,6 +299,10 @@ class Clip(_Model):
     transition: Optional[Transition] = None
     blend: BlendMode = "normal"
     chroma_key: Optional[ChromaKey] = None
+    trackers: list[Tracker] = Field(default_factory=list, max_length=20)
+    follow: Optional[FollowTrack] = None
+    pin: Optional[PinTrack] = None
+    stabilize: Optional[Stabilize] = None
     # The sound was separated into its own audio clip: this clip is silent.
     audio_detached: bool = False
     # Clips sharing a link id are selected / moved / deleted together (editor only).
