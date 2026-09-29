@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 from .. import config
-from ..models import Asset, Clip, Keyframe, Project
+from ..models import Asset, ChromaKey, Clip, Keyframe, Project
 from . import keyframes, media, nested, prerender, text, transitions
 from .cmdfile import Commands as _Commands
 
@@ -329,6 +329,41 @@ def _add_nested_input(
     return g.add_input(*seek, "-t", _num(read + 2 / child_fps), "-i", str(src.path)), extra, None
 
 
+def _key_filters(key: ChromaKey, idx: int) -> list[str]:
+    """Chroma key on the clip's source pixels: key -> despill -> choke/feather.
+    Returns filters producing RGBA (or the opaque matte when ``key.matte``)."""
+    color = ffmpeg_color(key.color)
+    out = [
+        # 4:4:4 so the key isn't computed on half-resolution chroma (blocky edges).
+        "format=yuva444p",
+        f"chromakey=color={color}:similarity={_num(key.similarity)}:blend={_num(key.smoothness)}",
+    ]
+    r, gr, b = (int(key.color[i:i + 2], 16) for i in (1, 3, 5))
+    kind = "green" if gr >= b else "blue"
+    if key.spill > EPS and max(gr, b) > r:
+        # despill mix=1 limits green (blue) to max(red, blue) - the usual limiter;
+        # strength crossfades between the original and the despilled colour.
+        if key.spill >= 1 - EPS:
+            out += ["format=rgba", f"despill=type={kind}:mix=1:expand=0"]
+        else:
+            s = _num(key.spill)
+            o, d, x = f"ko{idx}", f"kd{idx}", f"kx{idx}"
+            out.append(  # a branch inside the clip's chain: ";" separates, labels are per clip
+                f"format=rgba,split=2[{o}][{d}];[{d}]despill=type={kind}:mix=1:expand=0[{x}];"
+                f"[{o}][{x}]blend=all_expr='A*(1-{s})+B*{s}'"
+            )
+    if key.choke > EPS or key.feather > EPS:
+        out.append("format=gbrap")  # planar: the alpha plane is plane 3 (mask 8)
+        # 3x3 erosion per pass; thresholds 0 leave the colour planes untouched.
+        out += ["erosion=threshold0=0:threshold1=0:threshold2=0"] * round(key.choke)
+        if key.feather > EPS:
+            out.append(f"gblur=sigma={_num(key.feather / 2)}:planes=8")
+    if key.matte:
+        out += ["format=gbrap", "alphaextract", "format=gray"]  # pinned: blend leaves it ambiguous
+    out.append("format=rgba")
+    return out
+
+
 def _video_layer(
     g: Graph, project: Project, clip: Clip, vis: _Visible, win: Window, idx: int, pre: list[str],
     text_canvas: Optional[tuple[int, int]], single_frame: bool,
@@ -361,6 +396,10 @@ def _video_layer(
             f"crop=iw*{_num(c.width_fraction())}:ih*{_num(c.height_fraction())}"
             f":iw*{_num(c.left)}:ih*{_num(c.top)}"
         )
+    key = clip.chroma_key
+    keyed = key is not None and key.enabled and clip.type in ("video", "image", "sequence")
+    if keyed:
+        chain.extend(_key_filters(key, idx))  # type: ignore[arg-type]
     tr = clip.transform
     if scale_kf:
         # Animated size, padded onto a fixed transparent canvas so the overlay
@@ -379,7 +418,7 @@ def _video_layer(
         chain.append("vflip")
     rotating = bool(rot_kf) or abs(rot0 % 360) > EPS
     needs_alpha = (
-        clip.type in ("image", "text", "sequence") or op0 < 1 or bool(op_kf) or rotating or bool(scale_kf)
+        clip.type in ("image", "text", "sequence") or op0 < 1 or bool(op_kf) or rotating or bool(scale_kf) or keyed
     )
     if needs_alpha:
         chain.append("format=rgba")

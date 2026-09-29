@@ -12,6 +12,7 @@ import {
   Flag,
   Gauge,
   Minus,
+  Pipette,
   Settings2,
   Trash2,
   Plus,
@@ -31,13 +32,14 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api } from '../api/client'
-import type { AnimProp, Asset, BlendMode, Clip, Ease } from '../api/types'
+import type { AnimProp, Asset, BlendMode, ChromaKey, Clip, Ease } from '../api/types'
 import { Button, IconButton, inputClass, NumberInput } from '../components/ui'
 import { formatDuration, formatTimecode } from '../lib/format'
 import { toast } from '../components/toast'
 import { fillScale, sourceSize } from './geometry'
 import { allKeyTimes, EASES, framesOf, keyIndexAt, localTime, MARKER_COLORS, propAt, textStyleAt, visibleMarkers } from './keyframes'
 import { ProjectSettingsForm } from './ProjectSettings'
+import { DEFAULT_KEY, useKeyView } from './ChromaKey'
 import { FoldAllButton, Section } from '../components/Section'
 import { TransitionPanel } from './TransitionPanel'
 import { allSequences, clipEnd, gapAfter, sequenceAsset, MAX_SPEED, maxClipDuration, MIN_CLIP, MIN_SPEED, overlaps, speedRange, useEditor, type ClipPatch } from './store'
@@ -433,6 +435,10 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
         </Section>
       )}
 
+      {(clip.type === 'video' || clip.type === 'image' || clip.type === 'sequence') && (
+        <ChromaKeySection clip={clip} set={set} locked={locked} />
+      )}
+
       {clip.audio_detached && (
         <Section icon={<Volume2 size={14} />} title="Audio">
           <p className="text-[11px] text-faint">This clip’s sound was separated onto an audio track, so the clip itself is silent.</p>
@@ -611,6 +617,89 @@ function KeyframeBar({ clip, disabled }: { clip: Clip; disabled?: boolean }) {
 }
 
 /** A nested sequence clip: what it shows and a way in. */
+function ChromaKeySection({ clip, set, locked }: { clip: Clip; set: (p: ClipPatch) => void; locked: boolean }) {
+  const { beginGesture, endGesture } = useEditor.getState()
+  const k: ChromaKey = { ...DEFAULT_KEY, ...clip.chroma_key }
+  const on = !!clip.chroma_key?.enabled
+  const picking = useKeyView((s) => s.pick === clip.id)
+  const matte = useKeyView((s) => s.matte === clip.id)
+  // Leaving this clip (another selected) ends picking / matte view for it.
+  useEffect(
+    () => () =>
+      useKeyView.setState((v) => ({ pick: v.pick === clip.id ? null : v.pick, matte: v.matte === clip.id ? null : v.matte })),
+    [clip.id],
+  )
+  // ``matte`` is a preview aid and never saved.
+  const setKey = (p: Partial<ChromaKey>) => set({ chroma_key: { ...k, ...p, matte: undefined } })
+  const pct = { min: 0, max: 100, step: 1, precision: 0, suffix: '%', display: (v: number) => Math.round(v * 100), parse: (v: number) => v / 100 }
+  return (
+    <Section
+      icon={<Pipette size={14} />}
+      title="Chroma key"
+      onReset={clip.chroma_key ? () => set({ chroma_key: { ...DEFAULT_KEY, enabled: on } }) : undefined}
+    >
+      <label className="flex items-center gap-2 text-xs">
+        <input
+          type="checkbox"
+          checked={on}
+          disabled={locked}
+          onChange={(e) => {
+            setKey({ enabled: e.target.checked })
+            if (!e.target.checked) useKeyView.setState({ matte: null, pick: null })
+          }}
+          className="accent-accent"
+        />
+        Remove a green / blue screen
+      </label>
+      {on && (
+        <>
+          <Row label="Screen colour">
+            <div className="flex items-center gap-1.5">
+              <input
+                type="color"
+                value={k.color}
+                disabled={locked}
+                onPointerDown={beginGesture}
+                onBlur={endGesture}
+                onChange={(e) => setKey({ color: e.target.value })}
+                className="h-7 w-9 shrink-0 cursor-pointer rounded border border-line bg-bg p-0.5"
+                aria-label="Screen colour"
+              />
+              <span className="flex-1 font-mono text-[11px] text-muted uppercase">{k.color}</span>
+              <IconButton
+                label={picking ? 'Cancel picking' : 'Pick the screen colour from the preview'}
+                active={picking}
+                disabled={locked}
+                onClick={() => useKeyView.setState({ pick: picking ? null : clip.id })}
+              >
+                <Pipette size={14} />
+              </IconButton>
+            </div>
+          </Row>
+          <SliderRow label="Similarity" value={k.similarity} {...pct} min={1} onChange={(similarity) => setKey({ similarity })} />
+          <SliderRow label="Smoothness" value={k.smoothness} {...pct} onChange={(smoothness) => setKey({ smoothness })} />
+          <SliderRow label="Spill removal" value={k.spill} {...pct} onChange={(spill) => setKey({ spill })} />
+          <SliderRow label="Shrink edge" value={k.choke} min={0} max={10} step={1} precision={0} suffix="px" onChange={(choke) => setKey({ choke })} />
+          <SliderRow label="Feather" value={k.feather} min={0} max={10} step={0.5} precision={1} suffix="px" onChange={(feather) => setKey({ feather })} />
+          <label className="flex items-center gap-2 text-xs text-muted" title="Preview only: white = kept, black = removed, grey = see-through">
+            <input
+              type="checkbox"
+              checked={matte}
+              onChange={(e) => useKeyView.setState({ matte: e.target.checked ? clip.id : null })}
+              className="accent-accent"
+            />
+            Show matte (preview)
+          </label>
+          <p className="text-[11px] text-faint">
+            Pick the screen with <Pipette size={10} className="inline" />, raise Similarity until the screen is gone,
+            then Smoothness for softer edges. Use Show matte to check for holes.
+          </p>
+        </>
+      )}
+    </Section>
+  )
+}
+
 function NestedSection({ clip, asset }: { clip: Clip; asset: Asset }) {
   return (
     <Section icon={<Clapperboard size={14} />} title="Sequence">

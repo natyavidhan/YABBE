@@ -120,6 +120,19 @@ BlendMode = Literal[
 ]
 
 
+class ChromaKey(_Model):
+    """Green / blue screen removal (per clip; kept when toggled off)."""
+
+    enabled: bool = True
+    color: str = Field("#00b140", pattern=r"^#[0-9a-fA-F]{6}$")  # the screen colour
+    similarity: float = Field(0.10, ge=0.01, le=1)  # how far from the colour still counts as screen
+    smoothness: float = Field(0.05, ge=0, le=1)  # soft edge between keyed and kept
+    spill: float = Field(0.6, ge=0, le=1)  # remove the screen's colour cast from the subject
+    choke: float = Field(0.0, ge=0, le=10)  # shrink the matte (source pixels)
+    feather: float = Field(0.0, ge=0, le=10)  # soften the matte edge (source pixels)
+    matte: bool = False  # show the matte (black/white) instead; preview aid, not saved by the editor
+
+
 class Transition(_Model):
     """Transition from this clip into the next clip that touches it on the same
     track, centred on the cut (see engine/transitions.py for the kinds)."""
@@ -234,6 +247,7 @@ class Clip(_Model):
     markers: list[Marker] = Field(default_factory=list, max_length=500)
     transition: Optional[Transition] = None
     blend: BlendMode = "normal"
+    chroma_key: Optional[ChromaKey] = None
     # The sound was separated into its own audio clip: this clip is silent.
     audio_detached: bool = False
     # Clips sharing a link id are selected / moved / deleted together (editor only).

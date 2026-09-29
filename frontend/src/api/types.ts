@@ -52,6 +52,21 @@ export type BlendMode =
   | 'subtract'
   | 'divide'
 
+export interface ChromaKey {
+  enabled: boolean
+  /** The screen colour (#rrggbb). */
+  color: string
+  similarity: number
+  smoothness: number
+  /** Remove the screen's colour cast from the subject (0..1). */
+  spill: number
+  /** Shrink / soften the matte edge, in source pixels. */
+  choke: number
+  feather: number
+  /** Preview only: render the matte instead. */
+  matte?: boolean
+}
+
 export interface Track {
   id: string
   kind: TrackKind
@@ -199,6 +214,7 @@ export interface Clip {
   blend?: BlendMode
   /** The sound was separated into its own audio clip: this clip is silent. */
   audio_detached?: boolean
+  chroma_key?: ChromaKey | null
   /** Clips sharing a link id are selected / moved / deleted together. */
   link?: string | null
 }
