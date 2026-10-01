@@ -263,7 +263,9 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
       {locked && <div className="bg-warn/10 px-3 py-2 text-xs text-warn">This clip is on a locked track.</div>}
 
       {clip.type === 'text' && clip.text && <TextSection clip={clip} set={set} locked={locked} />}
-      {clip.type === 'shape' && <ShapeSection clip={clip} set={set} />}
+      {clip.type === 'shape' && (
+        <ShapeSection clip={clip} set={set} locked={locked} keyBtn={(p) => <KeyButton clip={clip} prop={p} disabled={locked} />} />
+      )}
       {clip.hold && (
         <p className="border-b border-line px-3 py-2 text-[11px] text-faint">
           Freeze frame: shows one frame of the video (at {clip.in_point.toFixed(2)} s) for as long as the clip lasts.

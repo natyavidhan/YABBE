@@ -52,7 +52,7 @@ export function MediaBin({ projectId, onAdded }: { projectId: string; onAdded?: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId])
 
-  const shown = [...assets].filter((a) => filter === 'all' || a.kind === filter).sort((a, b) => b.created_at - a.created_at)
+  const shown = [...assets].filter((a) => !a.hidden && (filter === 'all' || a.kind === filter)).sort((a, b) => b.created_at - a.created_at)
 
   return (
     <>

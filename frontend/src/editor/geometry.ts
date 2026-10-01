@@ -1,5 +1,5 @@
 import type { Asset, Clip, ProjectSettings } from '../api/types'
-import { textStyleAt, transformAt } from './keyframes'
+import { shapeStyleAt, textStyleAt, transformAt } from './keyframes'
 import { textKey } from './store'
 
 /** Mirrors backend compositor.layer_geometry (project pixels). */
@@ -23,7 +23,10 @@ export function sourceSize(
   textSizes: Record<string, { width: number; height: number }>,
   time?: number,
 ): { width: number; height: number } | null {
-  if (clip.type === 'shape') return clip.shape ? { width: clip.shape.width, height: clip.shape.height } : null
+  if (clip.type === 'shape') {
+    const s = time === undefined ? clip.shape : shapeStyleAt(clip, time)
+    return s ? { width: s.width, height: s.height } : null
+  }
   if (clip.type === 'text') {
     const style = time === undefined ? clip.text : textStyleAt(clip, time)
     if (!style) return null

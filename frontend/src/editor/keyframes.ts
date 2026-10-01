@@ -1,5 +1,5 @@
 // Mirrors backend/app/engine/keyframes.py — keep the curves identical.
-import type { AnimProp, Clip, Ease, Keyframe, TextStyle } from '../api/types'
+import type { AnimProp, Clip, Ease, Keyframe, ShapeStyle, TextStyle } from '../api/types'
 import { curveValueAt, namedEase, progressAt } from './curves'
 
 export const ANIM_PROPS: AnimProp[] = ['x', 'y', 'scale', 'rotation', 'opacity', 'volume']
@@ -20,7 +20,17 @@ export const TEXT_COLOR: Partial<Record<AnimProp, ColorTextField>> = {
 }
 const INT_FIELDS = new Set(['size', 'stroke_width', 'padding'])
 
-export const isColorProp = (p: AnimProp) => p in TEXT_COLOR
+type NumericShapeField = 'width' | 'height' | 'stroke_width' | 'radius'
+type ColorShapeField = 'fill' | 'stroke'
+export const SHAPE_NUMERIC: Partial<Record<AnimProp, NumericShapeField>> = {
+  shape_width: 'width',
+  shape_height: 'height',
+  shape_stroke_width: 'stroke_width',
+  shape_radius: 'radius',
+}
+export const SHAPE_COLOR: Partial<Record<AnimProp, ColorShapeField>> = { shape_fill: 'fill', shape_stroke: 'stroke' }
+
+export const isColorProp = (p: AnimProp) => p in TEXT_COLOR || p in SHAPE_COLOR
 
 export const EASES: { value: Ease; label: string }[] = [
   { value: 'linear', label: 'Linear' },
@@ -42,13 +52,32 @@ export function staticValue(clip: Clip, prop: AnimProp): number {
   if (prop === 'volume') return clip.volume
   const field = TEXT_NUMERIC[prop]
   if (field) return clip.text?.[field] ?? 0
+  const sf = SHAPE_NUMERIC[prop]
+  if (sf) return clip.shape?.[sf] ?? 0
   if (isColorProp(prop)) return 0
   return clip.transform[prop as 'x' | 'y' | 'scale' | 'rotation' | 'opacity']
 }
 
 export function staticColor(clip: Clip, prop: AnimProp): string | null {
   const field = TEXT_COLOR[prop]
-  return field ? (clip.text?.[field] ?? null) : null
+  if (field) return clip.text?.[field] ?? null
+  const sf = SHAPE_COLOR[prop]
+  return sf ? (clip.shape?.[sf] ?? null) : null
+}
+
+/** Shape with shape keyframes evaluated at timeline time ``T``. */
+export function shapeStyleAt(clip: Clip, T: number): ShapeStyle | null {
+  if (!clip.shape) return null
+  let style = clip.shape
+  for (const [prop, field] of Object.entries(SHAPE_NUMERIC) as [AnimProp, NumericShapeField][]) {
+    const f = framesOf(clip, prop)
+    if (f) style = { ...style, [field]: valueAt(f, T - clip.start) }
+  }
+  for (const [prop, field] of Object.entries(SHAPE_COLOR) as [AnimProp, ColorShapeField][]) {
+    const f = framesOf(clip, prop)
+    if (f) style = { ...style, [field]: colorAt(f, T - clip.start) }
+  }
+  return style
 }
 
 // -- colours ---------------------------------------------------------------------------

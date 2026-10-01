@@ -25,6 +25,8 @@ export interface Asset {
   error: string | null
   thumb_count: number
   thumb_interval: number
+  /** Made by the editor (e.g. a freeze frame): not listed in the media bin. */
+  hidden?: boolean
   created_at: number
 }
 
@@ -234,6 +236,12 @@ export type AnimProp =
   | 'text_line_spacing'
   | 'text_color'
   | 'text_stroke_color'
+  | 'shape_width'
+  | 'shape_height'
+  | 'shape_stroke_width'
+  | 'shape_radius'
+  | 'shape_fill'
+  | 'shape_stroke'
   | 'text_background'
 export type Ease =
   | 'linear'

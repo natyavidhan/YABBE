@@ -54,6 +54,8 @@ class Asset(_Model):
     thumb_count: int = 0
     thumb_interval: float = 0.0
     created_at: float = Field(default_factory=time.time)
+    # Made by the editor (e.g. a freeze frame), not uploaded: not listed in the media bin.
+    hidden: bool = False
 
 
 TrackKind = Literal["video", "audio"]
@@ -255,6 +257,9 @@ AnimProp = Literal[
     # text clips: style properties (re-rasterised per frame when animated)
     "text_size", "text_stroke_width", "text_padding", "text_line_spacing",
     "text_color", "text_stroke_color", "text_background",
+    # shape clips (re-drawn per frame when animated)
+    "shape_width", "shape_height", "shape_stroke_width", "shape_radius",
+    "shape_fill", "shape_stroke",
 ]
 ANIM_PROPS: tuple[str, ...] = AnimProp.__args__  # type: ignore[attr-defined]
 
@@ -265,6 +270,10 @@ TEXT_NUMERIC_PROPS = {
 }
 TEXT_COLOR_PROPS = {"text_color": "color", "text_stroke_color": "stroke_color", "text_background": "background"}
 TEXT_INT_FIELDS = {"size", "stroke_width", "padding"}
+SHAPE_NUMERIC_PROPS = {"shape_width": "width", "shape_height": "height",
+                       "shape_stroke_width": "stroke_width", "shape_radius": "radius"}
+SHAPE_COLOR_PROPS = {"shape_fill": "fill", "shape_stroke": "stroke"}
+COLOR_PROPS = {**TEXT_COLOR_PROPS, **SHAPE_COLOR_PROPS}
 Ease = Literal[
     "linear", "hold", "bezier",
     "ease_in", "ease_out", "ease_in_out",
@@ -286,6 +295,10 @@ ANIM_LIMITS: dict[str, tuple[float, float]] = {
     "text_stroke_width": (0, 100),
     "text_padding": (0, 500),
     "text_line_spacing": (0.5, 4),
+    "shape_width": (1, 8000),
+    "shape_height": (1, 8000),
+    "shape_stroke_width": (0, 500),
+    "shape_radius": (0, 0.5),
 }
 
 HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$")
@@ -362,7 +375,7 @@ class Clip(_Model):
                 continue
             by_time: dict[float, Keyframe] = {}
             for k in frames:  # one keyframe per time (last wins), values clamped
-                if prop in TEXT_COLOR_PROPS:
+                if prop in COLOR_PROPS:
                     if not k.c or not HEX_COLOR.match(k.c):
                         continue
                     by_time[round(k.t, 6)] = k.model_copy(update={"c": k.c.lower()})
@@ -379,6 +392,10 @@ class Clip(_Model):
 
     def static_value(self, prop: str) -> float:
         return self.volume if prop == "volume" else float(getattr(self.transform, prop))
+
+    @property
+    def shape_animated(self) -> bool:
+        return self.type == "shape" and any(self.animated(p) for p in (*SHAPE_NUMERIC_PROPS, *SHAPE_COLOR_PROPS))
 
     @property
     def text_animated(self) -> bool:

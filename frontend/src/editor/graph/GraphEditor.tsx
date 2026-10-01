@@ -69,6 +69,12 @@ export const PROP_META: Record<AnimProp, PropMeta> = {
   text_color: { label: 'Text colour', color: '#f1f3f5', mul: 1, unit: '' },
   text_stroke_color: { label: 'Outline colour', color: '#adb5bd', mul: 1, unit: '' },
   text_background: { label: 'Box colour', color: '#868e96', mul: 1, unit: '' },
+  shape_width: { label: 'Shape width', color: '#ffc078', mul: 1, unit: 'px', min: 1, max: 8000 },
+  shape_height: { label: 'Shape height', color: '#ffa8a8', mul: 1, unit: 'px', min: 1, max: 8000 },
+  shape_stroke_width: { label: 'Outline width', color: '#e599f7', mul: 1, unit: 'px', min: 0, max: 500 },
+  shape_radius: { label: 'Corners', color: '#99e9f2', mul: 200, unit: '%', min: 0, max: 0.5 },
+  shape_fill: { label: 'Fill', color: '#ffd8a8', mul: 1, unit: '' },
+  shape_stroke: { label: 'Outline colour', color: '#dee2e6', mul: 1, unit: '' },
 }
 
 const clampProp = (prop: AnimProp, v: number) => {

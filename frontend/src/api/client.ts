@@ -104,6 +104,8 @@ export const api = {
   // media
   uploadMedia: (id: string, file: File, onProgress?: (f: number) => void) =>
     uploadRaw<Asset>(`${p(id)}/media?filename=${encodeURIComponent(file.name)}`, file, onProgress),
+  freezeFrame: (id: string, assetId: string, t: number) =>
+    request<Asset>('POST', `${p(id)}/media/freeze`, { asset_id: assetId, t }),
   deleteAsset: (id: string, assetId: string) => request<{ ok: boolean }>('DELETE', `${p(id)}/media/${assetId}`),
   reprocessAsset: (id: string, assetId: string) => request<Asset>('POST', `${p(id)}/media/${assetId}/reprocess`),
   posterUrl: (id: string, assetId: string) => `${p(id)}/media/${assetId}/poster`,

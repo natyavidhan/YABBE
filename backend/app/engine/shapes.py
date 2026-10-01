@@ -82,3 +82,46 @@ def render(style: ShapeStyle, factor: float = 1.0) -> tuple[Path, int, int]:
     img.save(tmp, "PNG")
     tmp.replace(out)
     return out, w, h
+
+
+def animated_sequence(styles: list[ShapeStyle], fps: float, factor: float) -> tuple[Path, int, int]:
+    """One drawing per frame (``styles[i]`` is frame ``i``), centred on a fixed
+    transparent canvas (the largest size reached), as an ffconcat list playing at
+    ``fps``. Returns (list, canvas width, canvas height) - the canvas in project px."""
+    cw = max(s.width for s in styles)
+    ch = max(s.height for s in styles)
+    f = max(0.05, min(factor, MAX_SIDE / max(cw, ch)))
+    W, H = max(2, round(cw * f)), max(2, round(ch * f))
+    pad_dir = _cache_dir() / "pad"
+    pad_dir.mkdir(exist_ok=True)
+    padded: dict[str, Path] = {}
+    runs: list[list] = []
+    for st in styles:
+        k = st.model_dump_json()
+        if k not in padded:
+            png, w, h = render(st, f)
+            out = pad_dir / f"{hashlib.sha1((VERSION + k).encode()).hexdigest()[:16]}_{W}x{H}.png"
+            if not out.is_file():
+                canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+                with Image.open(png) as im:
+                    canvas.paste(im, ((W - w) // 2, (H - h) // 2))
+                tmp = out.with_suffix(f".{threading.get_ident()}.png")
+                canvas.save(tmp, "PNG")
+                tmp.replace(out)
+            padded[k] = out
+        p = padded[k]
+        if runs and runs[-1][0] == p:
+            runs[-1][1] += 1
+        else:
+            runs.append([p, 1])
+    lines = ["ffconcat version 1.0"]
+    for p, n in runs:
+        lines += [f"file '{p}'", f"duration {n / fps:.6f}"]
+    lines.append(f"file '{runs[-1][0]}'")
+    body = "\n".join(lines) + "\n"
+    lst = _cache_dir() / "seq"
+    lst.mkdir(exist_ok=True)
+    path = lst / (hashlib.sha1(body.encode()).hexdigest()[:20] + ".txt")
+    if not path.is_file():
+        path.write_text(body)
+    return path, round(cw), round(ch)

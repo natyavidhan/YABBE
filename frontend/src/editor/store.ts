@@ -1,10 +1,11 @@
 import { create } from 'zustand'
 import type { AnimProp, Asset, Clip, ClipType, Ease, Keyframe, Marker, Sequence, Transition, Project, ProjectSettings, ShapeKind, ShapeStyle, TextStyle, Timeline, Track, TrackKind } from '../api/types'
+import { api } from '../api/client'
 import { clamp, uid } from '../lib/format'
 import { recalcAuto } from './graph/model'
-import { freezeFrame as freezeClips } from './freeze'
+import { freezeFrame as freezeClips, freezeTarget } from './freeze'
 import { nestClips, unnestClip } from './nesting'
-import { colorPropAt, shiftMarkers, visibleMarkers, framesOf, isColorProp, keyIndexAt, localTime, propAt, shiftKeyframes, staticColor, staticValue, TEXT_COLOR, TEXT_NUMERIC, upsertKey } from './keyframes'
+import { colorPropAt, shiftMarkers, visibleMarkers, framesOf, isColorProp, keyIndexAt, localTime, propAt, shiftKeyframes, staticColor, staticValue, SHAPE_COLOR, SHAPE_NUMERIC, TEXT_COLOR, TEXT_NUMERIC, upsertKey } from './keyframes'
 
 /** The user-editable part of a project (what undo/redo and autosave cover). */
 /**
@@ -244,8 +245,8 @@ interface EditorState {
   addTextClip: () => string
   /** Add a shape at the playhead (top video track). */
   addShapeClip: (kind: ShapeKind) => string
-  /** Freeze the frame under the playhead. Error message or null. */
-  freezeFrame: () => string | null
+  /** Freeze the frame under the playhead (saved as a hidden photo). Error message or null. */
+  freezeFrame: () => Promise<string | null>
   moveClip: (id: string, start: number, trackId: string) => void
   splitAtPlayhead: () => void
   deleteSelected: () => void
@@ -322,6 +323,12 @@ function withStatic(c: Clip, prop: AnimProp, v: number | string | null): Clip {
   if (prop === 'volume') return { ...c, volume: v as number }
   const numField = TEXT_NUMERIC[prop]
   const colorField = TEXT_COLOR[prop]
+  const shapeNum = SHAPE_NUMERIC[prop]
+  const shapeColor = SHAPE_COLOR[prop]
+  if (shapeNum || shapeColor) {
+    if (!c.shape) return c
+    return { ...c, shape: { ...c.shape, [(shapeNum ?? shapeColor)!]: v } }
+  }
   if (numField || colorField) {
     if (!c.text) return c
     const value = numField && ['size', 'stroke_width', 'padding'].includes(numField) ? Math.round(v as number) : v
@@ -1093,10 +1100,22 @@ export const useEditor = create<EditorState>((set, get) => {
       return clip.id
     },
 
-    freezeFrame: () => {
-      const { doc, selection, playhead } = get()
-      const r = freezeClips(doc, selection, playhead)
-      if (typeof r === 'string') return r
+    freezeFrame: async () => {
+      const { doc, selection, playhead, projectId } = get()
+      const target = freezeTarget(doc, selection, playhead)
+      if (typeof target === 'string') return target
+      if (!projectId || !target.clip.asset_id) return 'No project open'
+      let image: Asset
+      try {
+        image = await api.freezeFrame(projectId, target.clip.asset_id, target.sourceT)
+      } catch (e) {
+        return e instanceof Error ? e.message : String(e)
+      }
+      set({ assets: [...get().assets, image] })
+      // The doc may have changed while the frame was being saved: apply to the current one.
+      const now = get().doc.clips.find((c) => c.id === target.clip.id)
+      if (!now) return 'The clip was removed'
+      const r = freezeClips(get().doc, { ...target, clip: now }, image.id)
       change(() => r.doc)
       set({ selection: [r.clipId], transSel: null })
       return null

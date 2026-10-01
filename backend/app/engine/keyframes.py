@@ -10,7 +10,8 @@ from typing import Sequence
 
 from . import curves
 
-from ..models import TEXT_COLOR_PROPS, TEXT_INT_FIELDS, TEXT_NUMERIC_PROPS, Clip, Keyframe, TextStyle
+from ..models import (SHAPE_COLOR_PROPS, SHAPE_NUMERIC_PROPS, TEXT_COLOR_PROPS, TEXT_INT_FIELDS, TEXT_NUMERIC_PROPS, Clip,
+                      Keyframe, ShapeStyle, TextStyle)
 
 
 def _num(v: float) -> str:
@@ -67,3 +68,20 @@ def text_style_at(clip: Clip, u: float) -> TextStyle:
         if frames:
             updates[field] = color_at(frames, u)
     return clip.text.model_copy(update=updates) if updates else clip.text
+
+
+def shape_style_at(clip: Clip, u: float) -> ShapeStyle:
+    """The clip's shape with shape keyframes evaluated at time ``u``."""
+    assert clip.shape is not None
+    updates: dict = {}
+    for prop, field in SHAPE_NUMERIC_PROPS.items():
+        frames = clip.animated(prop)
+        if frames:
+            v = value_at(frames, u)
+            lo, hi = (0.0, 0.5) if field == "radius" else (0.0, 500.0) if field == "stroke_width" else (1.0, 8000.0)
+            updates[field] = round(min(hi, max(lo, v)), 3)
+    for prop, field in SHAPE_COLOR_PROPS.items():
+        frames = clip.animated(prop)
+        if frames:
+            updates[field] = color_at(frames, u)
+    return clip.shape.model_copy(update=updates) if updates else clip.shape

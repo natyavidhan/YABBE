@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Clip } from '../api/types'
-import { freezeFrame } from './freeze'
+import { freezeFrame, freezeTarget } from './freeze'
 import type { Doc } from './store'
 
 const base = (id: string, extra: Partial<Clip>): Clip => ({
@@ -28,11 +28,14 @@ function doc(): Doc {
 
 describe('freeze frame', () => {
   it('splits, inserts the still and makes room', () => {
-    const r = freezeFrame(doc(), [], 1.5, 2)
-    if (typeof r === 'string') throw new Error(r)
+    const d = doc()
+    const target = freezeTarget(d, [], 1.5)
+    if (typeof target === 'string') throw new Error(target)
+    expect(target.sourceT).toBe(1 + 1.5 * 2) // the frame to save as a photo
+    const r = freezeFrame(d, target, 'img', 2)
     const c = (id: string) => r.doc.clips.find((x) => x.id === id)!
     const still = c(r.clipId)
-    expect(still).toMatchObject({ hold: true, start: 1.5, duration: 2, in_point: 1 + 1.5 * 2, speed: 1, link: null, track_id: 'v1' })
+    expect(still).toMatchObject({ type: 'image', asset_id: 'img', start: 1.5, duration: 2, link: null, track_id: 'v1' })
     expect(still.transform.x).toBeCloseTo(150) // keyframed x at that moment, baked in
     expect(still.keyframes).toEqual({})
     expect(c('vid')).toMatchObject({ start: 0, duration: 1.5, fade_out: 0 })
@@ -51,6 +54,6 @@ describe('freeze frame', () => {
   })
 
   it('needs a video under the playhead', () => {
-    expect(freezeFrame(doc(), [], 6.5)).toMatch(/video clip/) // nothing playing at 6.5 s
+    expect(freezeTarget(doc(), [], 6.5)).toMatch(/video clip/) // nothing playing at 6.5 s
   })
 })

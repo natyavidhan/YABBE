@@ -1,6 +1,7 @@
 import { Circle, Hexagon, Minus, MoveRight, Shapes as ShapesIcon, Square, Star, Triangle } from 'lucide-react'
 import { useState } from 'react'
-import type { Clip, ShapeKind, ShapeStyle } from '../api/types'
+import type { AnimProp, Clip, ShapeKind, ShapeStyle } from '../api/types'
+import { framesOf, shapeStyleAt } from './keyframes'
 import { ContextMenu } from '../components/ContextMenu'
 import { Section } from '../components/Section'
 import { Button, NumberInput } from '../components/ui'
@@ -89,9 +90,26 @@ function OptionalColor({ value, fallback, onChange, label }: { value: string | n
   )
 }
 
-export function ShapeSection({ clip, set }: { clip: Clip; set: (p: ClipPatch) => void }) {
-  const s: ShapeStyle = { ...DEFAULT_SHAPE, ...clip.shape }
-  const upd = (p: Partial<ShapeStyle>) => set({ shape: { ...s, ...p } })
+export function ShapeSection({ clip, set, keyBtn, locked }: {
+  clip: Clip
+  set: (p: ClipPatch) => void
+  /** ◆ keyframe button for an animatable property */
+  keyBtn: (p: AnimProp) => React.ReactNode
+  locked: boolean
+}) {
+  const playhead = useEditor((st) => st.playhead)
+  // Values at the playhead (animated ones auto-key when edited).
+  const s: ShapeStyle = { ...DEFAULT_SHAPE, ...(shapeStyleAt(clip, playhead) ?? clip.shape) }
+  const upd = (p: Partial<ShapeStyle>) => set({ shape: { ...DEFAULT_SHAPE, ...clip.shape, ...p } })
+  const setP = (values: Partial<Record<AnimProp, number | string | null>>) => {
+    if (!locked) useEditor.getState().setProps(clip.id, values)
+  }
+  const setColor = (prop: 'shape_fill' | 'shape_stroke', v: string | null) => {
+    if (locked) return
+    // turning a colour off can't be a keyframe: it stops animating
+    if (v === null && framesOf(clip, prop)) useEditor.getState().clearKeys(clip.id, prop)
+    setP({ [prop]: v })
+  }
   const line = s.kind === 'line' || s.kind === 'arrow'
   return (
     <Section icon={<ShapesIcon size={14} />} title="Shape">
@@ -112,28 +130,69 @@ export function ShapeSection({ clip, set }: { clip: Clip; set: (p: ClipPatch) =>
           </button>
         ))}
       </div>
-      <Row label="Size">
-        <div className="grid grid-cols-2 gap-1.5">
-          <NumberInput label="W" value={s.width} min={1} max={8000} step={1} precision={0} suffix="px" onChange={(width) => upd({ width })} />
-          <NumberInput label="H" value={s.height} min={1} max={8000} step={1} precision={0} suffix="px" onChange={(height) => upd({ height })} />
-        </div>
-      </Row>
+      {(['width', 'height'] as const).map((dim) => (
+        <Row key={dim} label={dim === 'width' ? 'Width' : 'Height'}>
+          <div className="flex items-center gap-1">
+            <div className="min-w-0 flex-1">
+              <NumberInput
+                label={dim === 'width' ? 'W' : 'H'}
+                value={Math.round(s[dim])}
+                min={1}
+                max={8000}
+                step={1}
+                precision={0}
+                suffix="px"
+                onChange={(v) => setP({ [`shape_${dim}`]: v })}
+              />
+            </div>
+            {keyBtn(`shape_${dim}`)}
+          </div>
+        </Row>
+      ))}
       {!line && (
         <Row label="Fill">
-          <OptionalColor label="Fill colour" value={s.fill} fallback="#7c5cff" onChange={(fill) => upd({ fill })} />
+          <div className="flex items-center gap-1">
+            <div className="min-w-0 flex-1">
+              <OptionalColor label="Fill colour" value={s.fill} fallback="#7c5cff" onChange={(v) => setColor('shape_fill', v)} />
+            </div>
+            {s.fill !== null && keyBtn('shape_fill')}
+          </div>
         </Row>
       )}
       <Row label={line ? 'Colour' : 'Outline'}>
-        <OptionalColor label={line ? 'Line colour' : 'Outline colour'} value={s.stroke} fallback="#ffffff" onChange={(stroke) => upd({ stroke, stroke_width: stroke && !s.stroke_width ? 8 : s.stroke_width })} />
+        <div className="flex items-center gap-1">
+          <div className="min-w-0 flex-1">
+            <OptionalColor
+              label={line ? 'Line colour' : 'Outline colour'}
+              value={s.stroke}
+              fallback="#ffffff"
+              onChange={(v) => {
+                setColor('shape_stroke', v)
+                if (v && !s.stroke_width) setP({ shape_stroke_width: 8 })
+              }}
+            />
+          </div>
+          {s.stroke !== null && keyBtn('shape_stroke')}
+        </div>
       </Row>
       {s.stroke !== null && (
         <Row label={line ? 'Thickness' : 'Outline width'}>
-          <NumberInput value={s.stroke_width} min={0} max={500} step={1} precision={0} suffix="px" onChange={(stroke_width) => upd({ stroke_width })} />
+          <div className="flex items-center gap-1">
+            <div className="min-w-0 flex-1">
+              <NumberInput value={Math.round(s.stroke_width)} min={0} max={500} step={1} precision={0} suffix="px" onChange={(v) => setP({ shape_stroke_width: v })} />
+            </div>
+            {keyBtn('shape_stroke_width')}
+          </div>
         </Row>
       )}
       {s.kind === 'rectangle' && (
         <Row label="Corners">
-          <NumberInput value={Math.round(s.radius * 200)} min={0} max={100} step={1} precision={0} suffix="%" onChange={(v) => upd({ radius: v / 200 })} />
+          <div className="flex items-center gap-1">
+            <div className="min-w-0 flex-1">
+              <NumberInput value={Math.round(s.radius * 200)} min={0} max={100} step={1} precision={0} suffix="%" onChange={(v) => setP({ shape_radius: v / 200 })} />
+            </div>
+            {keyBtn('shape_radius')}
+          </div>
         </Row>
       )}
       {(s.kind === 'polygon' || s.kind === 'star') && (
@@ -146,7 +205,7 @@ export function ShapeSection({ clip, set }: { clip: Clip; set: (p: ClipPatch) =>
           <NumberInput value={Math.round((1 - s.inner) * 100)} min={5} max={95} step={1} precision={0} suffix="%" onChange={(v) => upd({ inner: 1 - v / 100 })} />
         </Row>
       )}
-      <p className="text-[11px] text-faint">Move, scale, rotate and fade it in Transform below (keyframes work too).</p>
+      <p className="text-[11px] text-faint">◆ animates a property over time. Move, scale, rotate and fade it in Transform below.</p>
     </Section>
   )
 }

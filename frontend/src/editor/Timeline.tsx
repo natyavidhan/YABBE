@@ -1091,8 +1091,7 @@ function NestedThumb({ sequenceId, height, width, aspect }: { sequenceId?: strin
 }
 
 function freezeAtPlayhead() {
-  const err = useEditor.getState().freezeFrame()
-  if (err) toast.info(err)
+  useEditor.getState().freezeFrame().then((err) => err && toast.info(err))
 }
 
 function nestSelected() {

@@ -75,3 +75,57 @@ def test_freeze_frame(client, media_dir):
     assert np.abs(a - source).mean() < 6
     moving = _frame(client, pid, main, [{**still, "hold": False}], 1.7)
     assert np.abs(moving - source).mean() > 6  # (the video itself does move)
+
+
+def test_freeze_frame_as_image(client, media_dir):
+    """The editor's freeze frame: a still saved as a hidden image asset."""
+    pid = client.post("/api/projects", json={"name": "freeze-img", "width": 320, "height": 180, "fps": 25}).json()["id"]
+    vid = _upload(client, pid, media_dir / "clip.mp4")
+    main = main_seq(_wait_ready(client, pid))
+    r = client.post(f"/api/projects/{pid}/media/freeze", json={"asset_id": vid["id"], "t": 1.0})
+    assert r.status_code == 200, r.text
+    still = r.json()
+    assert still["kind"] == "image" and still["hidden"] and still["width"] == 640
+    project = _wait_ready(client, pid)
+    assert next(a for a in project["assets"] if a["id"] == still["id"])["status"] == "ready"
+    v = main["tracks"][1]["id"]
+    img = _frame(client, pid, main, [{"track_id": v, "type": "image", "asset_id": still["id"], "start": 0, "duration": 2}], 1.5)
+    source = _frame(client, pid, main, [{"track_id": v, "type": "video", "asset_id": vid["id"], "start": 0,
+                                         "duration": 2, "in_point": 1.0}], 0.0)
+    assert np.abs(img - source).mean() < 6  # the same picture as the video at 1.0 s
+    assert client.post(f"/api/projects/{pid}/media/freeze", json={"asset_id": still["id"], "t": 0}).status_code == 400
+
+
+def test_shape_keyframes(client):
+    """Shape properties animate: fill colour and width (previews and exports)."""
+    import subprocess
+    from conftest import _wait_job
+    from app import storage
+
+    pid = client.post("/api/projects", json={"name": "shape-kf", "width": 320, "height": 180, "fps": 25}).json()["id"]
+    main = main_seq(client.get(f"/api/projects/{pid}").json())
+    v = main["tracks"][1]["id"]
+    clip = {"track_id": v, "type": "shape", "start": 0, "duration": 2,
+            "shape": {"kind": "rectangle", "width": 100, "height": 60, "fill": "#ff0000"},
+            "keyframes": {"shape_fill": [{"t": 0, "c": "#ff0000", "ease": "linear"}, {"t": 2, "c": "#0000ff", "ease": "linear"}],
+                          "shape_width": [{"t": 0, "v": 100, "ease": "linear"}, {"t": 2, "v": 300, "ease": "linear"}]}}
+
+    def width(im):
+        row = np.abs(im[90] - im[90, 0]).max(-1) > 60
+        return int(row.sum())
+
+    a, b = _frame(client, pid, main, [clip], 0.0), _frame(client, pid, main, [clip], 1.96)
+    _near(a[90, 160], (255, 0, 0))
+    _near(b[90, 160], (0, 0, 255), 50)
+    assert abs(width(a) - 100) < 6 and abs(width(b) - 296) < 8, (width(a), width(b))
+
+    main["clips"] = [clip]
+    client.put(f"/api/projects/{pid}", json={"sequences": [main]})
+    r = client.post(f"/api/projects/{pid}/exports", json={"quality": "high"})
+    _wait_job(client, r.json()["job"]["id"])
+    path = storage.exports_dir(pid) / r.json()["export"]["filename"]
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-ss", "1.0", "-i", str(path), "-frames:v", "1", "-f", "rawvideo",
+                          "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
+    mid = np.frombuffer(raw, np.uint8).reshape(180, 320, 3).astype(int)
+    _near(mid[90, 160], (128, 0, 128), 45)  # halfway: purple
+    assert abs(width(mid) - 200) < 10, width(mid)

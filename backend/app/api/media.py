@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from .. import storage
 from ..engine import ffmpeg, media
@@ -107,6 +108,39 @@ async def upload(project_id: str, request: Request, filename: str):
         return p
 
     storage.update(project_id, add)
+    schedule_processing(project_id, asset_id)
+    return asset
+
+
+class FreezeRequest(BaseModel):
+    asset_id: str
+    t: float = Field(ge=0)  # source seconds
+
+
+@router.post("/freeze", response_model=Asset)
+def freeze_frame(project_id: str, body: FreezeRequest):
+    """A still of one video frame, as an image asset hidden from the media bin
+    (it behaves exactly like an uploaded photo)."""
+    project = get_project(project_id)
+    src = project.asset(body.asset_id)
+    if src is None or src.kind != "video":
+        raise HTTPException(400, "Freeze frames are taken from video clips")
+    storage.ensure_space(max(1, src.width * src.height), "a freeze frame")
+    asset_id = new_id("a_")
+    stored = f"{asset_id}.jpg"
+    dest = storage.media_dir(project_id) / stored
+    t = min(body.t, max(0.0, src.duration - 0.001))
+    try:
+        ffmpeg.run(["-y", "-ss", f"{t:.6f}", "-i", str(media.source_path(project_id, src)), "-frames:v", "1",
+                    "-q:v", "2", "-update", "1", str(dest)], timeout=120)
+        fields = media.analyze(dest)
+    except (ffmpeg.FFmpegError, ValueError) as exc:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(500, f"Could not grab that frame: {exc}") from None
+    name = f"Freeze of {Path(src.original_name).stem} at {t:.2f}s"
+    asset = Asset(id=asset_id, filename=stored, original_name=name[:200], size=dest.stat().st_size,
+                  hidden=True, **fields)
+    storage.update(project_id, lambda p: p.assets.append(asset) or p)
     schedule_processing(project_id, asset_id)
     return asset
 

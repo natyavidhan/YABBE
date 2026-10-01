@@ -111,7 +111,10 @@ def source_size(project: Project, clip: Clip, u: float = 0.0) -> Optional[tuple[
             return None
         return text.measure(keyframes.text_style_at(clip, u))
     if clip.type == "shape":
-        return (round(clip.shape.width), round(clip.shape.height)) if clip.shape else None
+        if clip.shape is None:
+            return None
+        s = keyframes.shape_style_at(clip, u)
+        return round(s.width), round(s.height)
     asset = project.asset(clip.asset_id)
     if asset is None or not asset.width or not asset.height:
         return None
@@ -288,7 +291,13 @@ def _add_video_input(
         # Rasterised at the size it's shown (largest scale it reaches), so it stays sharp.
         frames = clip.animated("scale")
         most = max([kf.v for kf in frames] + [clip.transform.scale]) if frames else clip.transform.scale
-        png, _, _ = shapes.render(clip.shape, max(0.05, win.scale * most))
+        factor = max(0.05, win.scale * most)
+        if clip.shape_animated and not single_frame:
+            n = max(1, math.ceil(vis.length * fps)) + 1
+            styles = [keyframes.shape_style_at(clip, vis.into + i / fps) for i in range(n)]
+            seq, cw, ch = shapes.animated_sequence(styles, fps, factor)
+            return g.add_input("-f", "concat", "-safe", "0", "-i", str(seq)), [], (cw, ch)
+        png, _, _ = shapes.render(keyframes.shape_style_at(clip, vis.into), factor)
         return g.add_input("-loop", "1", "-framerate", _num(fps), "-t", _num(vis.length + 1 / fps), "-i", str(png)), [], None
     if asset is None:
         return None
