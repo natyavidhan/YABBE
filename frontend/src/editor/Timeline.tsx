@@ -41,6 +41,8 @@ import { isTouchEvent, useIsMobile } from '../lib/useMedia'
 import { allKeyTimes, shiftKeyframes, shiftMarkers, visibleMarkers } from './keyframes'
 import { ASSET_MIME } from './MediaBin'
 import { allMarkers, assetKey, assetsWithSequences, clipEnd, cuts, docDuration, maxClipDuration, MIN_CLIP, overlaps, transitionLength, useEditor, withLinked } from './store'
+import { addEffect, EFFECT_MIME, effectDef, effectsOf, type EffectId } from './effects'
+import { useInspectorTab } from './inspectorTab'
 import { RenderBadge } from './Renders'
 import { unnestBlocker } from './nesting'
 import { useSequenceThumb } from './SequenceThumb'
@@ -1009,11 +1011,38 @@ const TimelineClip = memo(function TimelineClip({
       onPointerDown={(e) => onDown(e, clip, 'body')}
       onContextMenu={(e) => onContextMenu(e, clip)}
       onDoubleClick={() => clip.type === 'sequence' && clip.sequence_id && useEditor.getState().openNested(clip.sequence_id)}
+      onDragOver={(e) => {
+        if (!locked && e.dataTransfer.types.includes(EFFECT_MIME)) {
+          e.preventDefault()
+          e.stopPropagation()
+          e.dataTransfer.dropEffect = 'copy'
+          e.currentTarget.dataset.fxOver = '1'
+        }
+      }}
+      onDragLeave={(e) => delete e.currentTarget.dataset.fxOver}
+      onDrop={(e) => {
+        const id = e.dataTransfer.getData(EFFECT_MIME) as EffectId
+        delete e.currentTarget.dataset.fxOver
+        if (!id) return
+        e.preventDefault()
+        e.stopPropagation()
+        const err = addEffect(clip.id, id)
+        if (err) toast.info(err)
+        else {
+          useEditor.getState().select([clip.id])
+          useInspectorTab.getState().setTab('properties')
+        }
+      }}
       title={`${label}${clip.type === 'sequence' ? ' — double-click to open' : ''}${linked ? ' (linked — Alt+click selects just this clip)' : ''}`}
     >
       <div className="flex h-4 items-center gap-1 overflow-hidden px-1.5 text-[10px] leading-4 font-medium whitespace-nowrap text-white/95">
         {clip.type === 'sequence' && <Clapperboard size={10} className="shrink-0" aria-label="Sequence" />}
         {clip.hold && <Snowflake size={10} className="shrink-0" aria-label="Freeze frame" />}
+        {effectsOf(clip).length > 0 && (
+          <span className="shrink-0 rounded bg-black/30 px-0.5 text-[9px] font-bold" title={effectsOf(clip).map((id) => effectDef(id)?.name).join(', ')}>
+            fx
+          </span>
+        )}
         {linked && <Link2 size={10} className="shrink-0" aria-label="Linked" />}
         {clip.muted && <VolumeX size={10} />}
         <span className="truncate">{label}</span>

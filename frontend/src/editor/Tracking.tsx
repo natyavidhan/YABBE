@@ -343,15 +343,34 @@ export function TrackerOverlay({ width }: { width: number }) {
 
 // -- inspector ------------------------------------------------------------------------------
 
-export function MotionTrackingSection({ clip, asset, locked }: { clip: Clip; asset: Asset; locked: boolean }) {
+/** ``mode``: the Motion tracking effect (point / transform / corner pin trackers)
+ * or the Stabilize effect (its stabilize tracker and settings). */
+export function MotionTrackingSection({ clip, asset, locked, mode = 'track', extra }: {
+  clip: Clip
+  asset: Asset
+  locked: boolean
+  mode?: 'track' | 'stabilize'
+  extra?: React.ReactNode
+}) {
   const projectId = useEditor((s) => s.projectId)
   const status = useTracking((s) => s.status)
   const editing = useTracking((s) => s.editing)
-  const trackers = clip.trackers ?? []
+  const stab = mode === 'stabilize'
+  const trackers = (clip.trackers ?? []).filter((t) => (t.kind === 'stabilize') === stab)
   return (
-    <Section icon={<Scan size={14} />} title="Motion tracking">
-      <div className="grid grid-cols-2 gap-1.5">
-        {KINDS.map((k) => (
+    <Section
+      icon={stab ? <Vibrate size={14} /> : <Scan size={14} />}
+      title={stab ? 'Stabilize' : 'Motion tracking'}
+      extra={extra}
+      dimmed={stab && clip.stabilize?.enabled === false}
+    >
+      {stab && trackers.length === 0 && (
+        <button type="button" disabled={locked} onClick={() => addTracker(clip, asset, 'stabilize')} className="text-left text-[11px] text-accent-2">
+          Analyse camera motion
+        </button>
+      )}
+      <div className={`grid grid-cols-2 gap-1.5 ${stab ? 'hidden' : ''}`}>
+        {KINDS.filter((k) => k.kind !== 'stabilize').map((k) => (
           <button
             key={k.kind}
             type="button"
@@ -365,7 +384,7 @@ export function MotionTrackingSection({ clip, asset, locked }: { clip: Clip; ass
           </button>
         ))}
       </div>
-      {trackers.length === 0 && (
+      {trackers.length === 0 && !stab && (
         <p className="text-[11px] text-faint">Pick what to track. Tracking runs on the server and is reused until you change the tracker.</p>
       )}
       {trackers.map((t) => {

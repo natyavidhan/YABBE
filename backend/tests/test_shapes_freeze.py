@@ -129,3 +129,19 @@ def test_shape_keyframes(client):
     mid = np.frombuffer(raw, np.uint8).reshape(180, 320, 3).astype(int)
     _near(mid[90, 160], (128, 0, 128), 45)  # halfway: purple
     assert abs(width(mid) - 200) < 10, width(mid)
+
+
+def test_effect_switches(client):
+    """Effects keep their settings while switched off: a disabled crop doesn't crop."""
+    pid = client.post("/api/projects", json={"name": "fx", "width": 320, "height": 180, "fps": 25}).json()["id"]
+    main = main_seq(client.get(f"/api/projects/{pid}").json())
+    v = main["tracks"][1]["id"]
+    clip = {"track_id": v, "type": "shape", "start": 0, "duration": 2, "effects": ["crop"],
+            "shape": {"kind": "rectangle", "width": 200, "height": 100, "fill": "#ff0000"},
+            "crop": {"left": 0.5}}
+    on = _frame(client, pid, main, [clip])
+    off = _frame(client, pid, main, [{**clip, "crop": {"left": 0.5, "enabled": False}}])
+    assert (np.abs(on - (255, 0, 0)).max(-1) < 60).sum() < 0.6 * (np.abs(off - (255, 0, 0)).max(-1) < 60).sum()
+    main["clips"] = [clip]
+    saved = main_seq(client.put(f"/api/projects/{pid}", json={"sequences": [main]}).json())
+    assert saved["clips"][0]["effects"] == ["crop"]

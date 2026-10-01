@@ -608,7 +608,7 @@ def _video_layer(
     roto_chain = _roto_filters(g, project, clip, vis, pre, idx, (_even(full_w), _even(full_h)))
     if roto_chain:
         chain.extend(roto_chain)
-    c = clip.crop
+    c = clip.crop.effective()
     if not c.is_identity():
         chain.append(
             f"crop=iw*{_num(c.width_fraction())}:ih*{_num(c.height_fraction())}"

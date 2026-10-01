@@ -74,7 +74,7 @@ def source_to_canvas(project: Project, clip: Clip, u: float, nx: float, ny: floa
     base = base_size(project, clip, u)
     if base is None:
         return project.settings.width / 2, project.settings.height / 2
-    c = clip.crop
+    c = clip.crop.effective()
     fx = (nx - c.left) / max(1e-6, c.width_fraction()) - 0.5
     fy = (ny - c.top) / max(1e-6, c.height_fraction()) - 0.5
     if clip.transform.flip_h:
@@ -184,7 +184,7 @@ def _auto_zoom(corr: np.ndarray, w: float, h: float) -> float:
 def stabilize_offsets(project: Project, clip: Clip, us: list[float]) -> Optional[dict[str, list[float]]]:
     """Per-sample corrections for a stabilised clip: dx, dy (canvas px), drot, dscale."""
     st = clip.stabilize
-    if st is None or clip.asset_id is None:
+    if st is None or not st.enabled or clip.asset_id is None:
         return None
     f = find(project, clip.id, st.tracker_id)
     if f is None or f.data is None:

@@ -85,15 +85,22 @@ class Crop(_Model):
     top: float = Field(0.0, ge=0, lt=1)
     right: float = Field(0.0, ge=0, lt=1)
     bottom: float = Field(0.0, ge=0, lt=1)
+    enabled: bool = True  # the Crop effect's on / off switch (values are kept while off)
+
+    def effective(self) -> "Crop":
+        return self if self.enabled else Crop()
 
     def is_identity(self) -> bool:
-        return not (self.left or self.top or self.right or self.bottom)
+        c = self.effective()
+        return not (c.left or c.top or c.right or c.bottom)
 
     def width_fraction(self) -> float:
-        return max(0.01, 1 - self.left - self.right)
+        c = self.effective()
+        return max(0.01, 1 - c.left - c.right)
 
     def height_fraction(self) -> float:
-        return max(0.01, 1 - self.top - self.bottom)
+        c = self.effective()
+        return max(0.01, 1 - c.top - c.bottom)
 
 
 class TextStyle(_Model):
@@ -179,6 +186,7 @@ class Stabilize(_Model):
     """Remove camera shake using a stabilize tracker on the same clip."""
 
     tracker_id: str
+    enabled: bool = True  # the Stabilize effect's on / off switch
     mode: Literal["smooth", "lock"] = "smooth"
     smoothness: float = Field(1.0, ge=0.05, le=10)  # seconds of motion averaged (smooth mode)
     rotation: bool = True
@@ -359,6 +367,10 @@ class Clip(_Model):
     stabilize: Optional[Stabilize] = None
     roto: Optional[Roto] = None
     shape: Optional[ShapeStyle] = None
+    # Effects added from the Effects tab, in the order shown (None = not organised
+    # yet: the editor infers them from the clip's settings). The settings each
+    # effect uses live in their own fields (crop, speed, chroma_key, roto, ...).
+    effects: Optional[list[str]] = Field(None, max_length=64)
     # Freeze frame: show the source frame at ``in_point`` for the whole clip (silent).
     hold: bool = False
     # The sound was separated into its own audio clip: this clip is silent.

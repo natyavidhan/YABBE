@@ -332,7 +332,7 @@ async function tint(blob: Blob): Promise<string> {
 
 // -- inspector -----------------------------------------------------------------------------
 
-export function RotoSection({ clip, asset, locked }: { clip: Clip; asset: Asset; locked: boolean }) {
+export function RotoSection({ clip, asset, locked, extra }: { clip: Clip; asset: Asset; locked: boolean; extra?: React.ReactNode }) {
   const available = useRoto((s) => s.available)
   const editing = useRoto((s) => s.editing === clip.id)
   const matte = useRoto((s) => s.matte === clip.id)
@@ -350,7 +350,7 @@ export function RotoSection({ clip, asset, locked }: { clip: Clip; asset: Asset;
 
   if (available === false)
     return (
-      <Section icon={<Brush size={14} />} title="Roto brush">
+      <Section icon={<Brush size={14} />} title="Roto brush" extra={extra}>
         <p className="text-[11px] text-faint">The roto brush model isn’t installed on this server.</p>
       </Section>
     )
@@ -359,6 +359,8 @@ export function RotoSection({ clip, asset, locked }: { clip: Clip; asset: Asset;
       icon={<Brush size={14} />}
       title="Roto brush"
       onReset={r ? () => setRoto(clip.id, { invert: false, refine: true, choke: 0, feather: 0 }) : undefined}
+      extra={extra}
+      dimmed={r?.enabled === false}
     >
       {!r || frames === 0 ? (
         <>
@@ -410,11 +412,12 @@ export function RotoSection({ clip, asset, locked }: { clip: Clip; asset: Asset;
               disabled={locked}
               onClick={() => {
                 useRoto.setState({ editing: null })
-                useEditor.getState().updateClip(clip.id, { roto: null })
+                setRoto(clip.id, { prompts: [] })
               }}
               className="flex h-7 items-center justify-center gap-1.5 rounded-md border border-line text-[11px] text-muted hover:border-line-strong hover:text-fg"
+              title="Clear the selection and select again"
             >
-              <Trash2 size={12} /> Remove
+              <Trash2 size={12} /> Clear selection
             </button>
           </div>
           <div className="flex gap-1">
@@ -442,10 +445,6 @@ export function RotoSection({ clip, asset, locked }: { clip: Clip; asset: Asset;
           <label className="flex items-center gap-2 text-xs text-muted">
             <input type="checkbox" checked={matte} onChange={(e) => useRoto.setState({ matte: e.target.checked ? clip.id : null })} className="accent-accent" />
             Show matte (preview)
-          </label>
-          <label className="flex items-center gap-2 text-xs text-muted">
-            <input type="checkbox" checked={r.enabled} disabled={locked} onChange={(e) => setRoto(clip.id, { enabled: e.target.checked })} className="accent-accent" />
-            Apply the cut-out
           </label>
         </>
       )}

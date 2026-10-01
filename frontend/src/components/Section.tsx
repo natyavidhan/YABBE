@@ -59,11 +59,17 @@ export function Section({
   title,
   children,
   onReset,
+  extra,
+  dimmed = false,
 }: {
   icon: ReactNode
   title: string
   children: ReactNode
   onReset?: () => void
+  /** Header controls on the right (e.g. an effect's on / off switch and remove button). */
+  extra?: ReactNode
+  /** Fade the body (an effect that's switched off). */
+  dimmed?: boolean
 }) {
   const folded = useSections((s) => !!s.folded[title])
   const toggle = useSections((s) => s.toggle)
@@ -96,9 +102,10 @@ export function Section({
             <RotateCcw size={12} />
           </IconButton>
         )}
+        {extra}
       </div>
       {!folded && (
-        <div id={id} className="flex flex-col gap-2">
+        <div id={id} className={`flex flex-col gap-2 ${dimmed ? 'opacity-45' : ''}`}>
           {children}
         </div>
       )}

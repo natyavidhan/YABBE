@@ -101,6 +101,8 @@ export function freezeFrame(doc: Doc, target: FreezeTarget, imageAssetId: string
           pin: null,
           stabilize: null,
           roto: null,
+          // the still is a photo: keep only the effects photos can have
+          effects: c.effects ? c.effects.filter((id) => id === 'crop' || id === 'chroma_key') : c.effects,
         }
       }
     } else if (tracks.has(c.track_id) && c.start >= t - 1e-6) {

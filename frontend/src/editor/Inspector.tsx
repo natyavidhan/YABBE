@@ -40,6 +40,9 @@ import { fillScale, sourceSize } from './geometry'
 import { allKeyTimes, EASES, framesOf, keyIndexAt, localTime, MARKER_COLORS, propAt, textStyleAt, visibleMarkers } from './keyframes'
 import { ProjectSettingsForm } from './ProjectSettings'
 import { ShapeSection } from './Shapes'
+import { addEffect, EFFECT_MIME, effectDef, effectsOf, removeEffect, setEffectEnabled, type EffectId } from './effects'
+import { EffectsPanel } from './EffectsPanel'
+import { useInspectorTab } from './inspectorTab'
 import { MotionTrackingSection } from './Tracking'
 import { RotoSection } from './Roto'
 import { DEFAULT_KEY, useKeyView } from './ChromaKey'
@@ -69,8 +72,33 @@ const BLEND_GROUPS: [string, [BlendMode, string][]][] = [
 
 export function Inspector() {
   const transSel = useEditor((s) => s.transSel)
-  if (transSel) return <TransitionPanel clipId={transSel} />
-  return <ClipOrProjectInspector />
+  const tab = useInspectorTab((s) => s.tab)
+  const setTab = useInspectorTab((s) => s.setTab)
+  const fxCount = useEditor((s) =>
+    s.selection.length === 1 ? effectsOf(s.doc.clips.find((c) => c.id === s.selection[0]) ?? ({ effects: [] } as unknown as Clip)).length : 0,
+  )
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div role="tablist" aria-label="Inspector" className="flex h-9 shrink-0 border-b border-line">
+        {(['properties', 'effects'] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            role="tab"
+            aria-selected={tab === t}
+            onClick={() => setTab(t)}
+            className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 text-xs font-medium transition-colors ${
+              tab === t ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'
+            }`}
+          >
+            {t === 'properties' ? 'Properties' : 'Effects'}
+            {t === 'properties' && fxCount > 0 && <span className="rounded-full bg-accent/20 px-1.5 text-[10px] text-accent-2">fx {fxCount}</span>}
+          </button>
+        ))}
+      </div>
+      {tab === 'effects' ? <EffectsPanel /> : transSel ? <TransitionPanel clipId={transSel} /> : <ClipOrProjectInspector />}
+    </div>
+  )
 }
 
 function ClipOrProjectInspector() {
@@ -304,8 +332,6 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
 
       {clip.type === 'sequence' && asset && <NestedSection clip={clip} asset={asset} />}
 
-      {(clip.type === 'video' || clip.type === 'audio' || clip.type === 'sequence') && !clip.hold && <SpeedSection clip={clip} locked={locked} />}
-
       <MarkersSection clip={clip} locked={locked} />
 
       {visual && (
@@ -434,44 +460,6 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
         </Section>
       )}
 
-      {(clip.type === 'video' || clip.type === 'image' || clip.type === 'sequence') && (
-        <Section icon={<CropIcon size={14} />} title="Crop" onReset={() => set({ crop: { left: 0, top: 0, right: 0, bottom: 0 } })}>
-          {(['left', 'right', 'top', 'bottom'] as const).map((side) => {
-            const opposite = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' } as const
-            const maxV = Math.max(0, 95 - clip.crop[opposite[side]] * 100)
-            return (
-              <SliderRow
-                key={side}
-                label={side[0].toUpperCase() + side.slice(1)}
-                value={clip.crop[side]}
-                min={0}
-                max={95}
-                step={0.5}
-                precision={1}
-                suffix="%"
-                display={(v) => Math.round(v * 1000) / 10}
-                parse={(v) => Math.min(v, maxV) / 100}
-                onChange={(v) => set({ crop: { [side]: v } })}
-              />
-            )
-          })}
-          {size && (
-            <p className="text-[11px] text-faint">
-              Result {Math.round(size.width * (1 - clip.crop.left - clip.crop.right))}×
-              {Math.round(size.height * (1 - clip.crop.top - clip.crop.bottom))} px of {size.width}×{size.height}
-            </p>
-          )}
-        </Section>
-      )}
-
-      {(clip.type === 'video' || clip.type === 'image' || clip.type === 'sequence') && (
-        <ChromaKeySection clip={clip} set={set} locked={locked} />
-      )}
-
-      {clip.type === 'video' && asset && !clip.hold && <RotoSection clip={clip} asset={asset} locked={locked} />}
-
-      {clip.type === 'video' && asset && !clip.hold && <MotionTrackingSection clip={clip} asset={asset} locked={locked} />}
-
       {clip.audio_detached && (
         <Section icon={<Volume2 size={14} />} title="Audio">
           <p className="text-[11px] text-faint">This clip’s sound was separated onto an audio track, so the clip itself is silent.</p>
@@ -525,7 +513,135 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
           )}
         </Section>
       )}
+
+      {effectsOf(clip).map((id) => (
+        <EffectSection key={id} id={id} clip={clip} asset={asset} set={set} locked={locked} size={size} />
+      ))}
+      <EffectDropZone clip={clip} locked={locked} />
     </div>
+  )
+}
+
+/** An added effect's settings, with its on / off switch and remove button. */
+function EffectSection({ id, clip, asset, set, locked, size }: {
+  id: EffectId
+  clip: Clip
+  asset: Asset | undefined
+  set: (p: ClipPatch) => void
+  locked: boolean
+  size: { width: number; height: number } | null
+}) {
+  const def = effectDef(id)
+  if (!def) return null
+  const on = def.toggle ? def.toggle.get(clip) : true
+  const extra = (
+    <span className="flex items-center gap-0.5">
+      {def.toggle && (
+        <IconButton
+          label={on ? `Turn ${def.name} off (keeps its settings)` : `Turn ${def.name} on`}
+          active={on}
+          disabled={locked}
+          onClick={() => setEffectEnabled(clip.id, id, !on)}
+          className="h-6! w-7! text-[10px] font-bold"
+        >
+          fx
+        </IconButton>
+      )}
+      <IconButton label={`Remove ${def.name}`} disabled={locked} onClick={() => removeEffect(clip.id, id)} className="h-6! w-6!">
+        <X size={12} />
+      </IconButton>
+    </span>
+  )
+  const video = clip.type === 'video' && asset ? asset : null
+  switch (id) {
+    case 'crop':
+      return <CropSection clip={clip} set={set} size={size} extra={extra} dimmed={!on} />
+    case 'speed':
+      return <SpeedSection clip={clip} locked={locked} extra={extra} />
+    case 'chroma_key':
+      return <ChromaKeySection clip={clip} set={set} locked={locked} extra={extra} />
+    case 'roto':
+      return video ? <RotoSection clip={clip} asset={video} locked={locked} extra={extra} /> : null
+    case 'tracking':
+      return video ? <MotionTrackingSection clip={clip} asset={video} locked={locked} extra={extra} /> : null
+    case 'stabilize':
+      return video ? <MotionTrackingSection clip={clip} asset={video} locked={locked} mode="stabilize" extra={extra} /> : null
+  }
+}
+
+/** Drop an effect from the Effects tab here (or open the tab). */
+function EffectDropZone({ clip, locked }: { clip: Clip; locked: boolean }) {
+  const [over, setOver] = useState(false)
+  return (
+    <div
+      onDragOver={(e) => {
+        if (!locked && e.dataTransfer.types.includes(EFFECT_MIME)) {
+          e.preventDefault()
+          setOver(true)
+        }
+      }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        setOver(false)
+        const id = e.dataTransfer.getData(EFFECT_MIME) as EffectId
+        if (!id) return
+        e.preventDefault()
+        const err = addEffect(clip.id, id)
+        if (err) toast.info(err)
+      }}
+      className={`m-3 flex flex-col items-center gap-1 rounded-lg border border-dashed px-3 py-3 text-center text-[11px] transition-colors ${
+        over ? 'border-accent bg-accent/10 text-fg' : 'border-line text-faint'
+      }`}
+    >
+      <span>Drop an effect here to add it to this clip</span>
+      <button type="button" className="text-accent-2 hover:underline" onClick={() => useInspectorTab.getState().setTab('effects')}>
+        Browse effects
+      </button>
+    </div>
+  )
+}
+
+function CropSection({ clip, set, size, extra, dimmed }: {
+  clip: Clip
+  set: (p: ClipPatch) => void
+  size: { width: number; height: number } | null
+  extra?: ReactNode
+  dimmed?: boolean
+}) {
+  return (
+    <Section
+      icon={<CropIcon size={14} />}
+      title="Crop"
+      onReset={() => set({ crop: { left: 0, top: 0, right: 0, bottom: 0 } })}
+      extra={extra}
+      dimmed={dimmed}
+    >
+      {(['left', 'right', 'top', 'bottom'] as const).map((side) => {
+        const opposite = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' } as const
+        const maxV = Math.max(0, 95 - clip.crop[opposite[side]] * 100)
+        return (
+          <SliderRow
+            key={side}
+            label={side[0].toUpperCase() + side.slice(1)}
+            value={clip.crop[side]}
+            min={0}
+            max={95}
+            step={0.5}
+            precision={1}
+            suffix="%"
+            display={(v) => Math.round(v * 1000) / 10}
+            parse={(v) => Math.min(v, maxV) / 100}
+            onChange={(v) => set({ crop: { [side]: v } })}
+          />
+        )
+      })}
+      {size && (
+        <p className="text-[11px] text-faint">
+          Result {Math.round(size.width * (1 - clip.crop.left - clip.crop.right))}×
+          {Math.round(size.height * (1 - clip.crop.top - clip.crop.bottom))} px of {size.width}×{size.height}
+        </p>
+      )}
+    </Section>
   )
 }
 
@@ -658,7 +774,7 @@ function isScreenColour(hex: string) {
   return p - others >= 40
 }
 
-function ChromaKeySection({ clip, set, locked }: { clip: Clip; set: (p: ClipPatch) => void; locked: boolean }) {
+function ChromaKeySection({ clip, set, locked, extra }: { clip: Clip; set: (p: ClipPatch) => void; locked: boolean; extra?: ReactNode }) {
   const { beginGesture, endGesture } = useEditor.getState()
   const k: ChromaKey = { ...DEFAULT_KEY, ...clip.chroma_key }
   const on = !!clip.chroma_key?.enabled
@@ -677,22 +793,11 @@ function ChromaKeySection({ clip, set, locked }: { clip: Clip; set: (p: ClipPatc
     <Section
       icon={<Pipette size={14} />}
       title="Chroma key"
-      onReset={clip.chroma_key ? () => set({ chroma_key: { ...DEFAULT_KEY, enabled: on } }) : undefined}
+      onReset={() => set({ chroma_key: { ...DEFAULT_KEY, enabled: on } })}
+      extra={extra}
+      dimmed={!on}
     >
-      <label className="flex items-center gap-2 text-xs">
-        <input
-          type="checkbox"
-          checked={on}
-          disabled={locked}
-          onChange={(e) => {
-            setKey({ enabled: e.target.checked })
-            if (!e.target.checked) useKeyView.setState({ matte: null, pick: null })
-          }}
-          className="accent-accent"
-        />
-        Remove a green / blue screen
-      </label>
-      {on && (
+      {(
         <>
           <Row label="Screen colour">
             <div className="flex items-center gap-1.5">
@@ -881,7 +986,7 @@ function useHoldRepeat() {
 }
 
 /** Speed stepper + "fit to duration": retimes the same footage. */
-function SpeedSection({ clip, locked }: { clip: Clip; locked: boolean }) {
+function SpeedSection({ clip, locked, extra }: { clip: Clip; locked: boolean; extra?: ReactNode }) {
   const clips = useEditor((s) => s.doc.clips)
   const { fitClipDuration } = useEditor.getState()
   const [draft, setDraft] = useState<string | null>(null)
@@ -944,7 +1049,7 @@ function SpeedSection({ clip, locked }: { clip: Clip; locked: boolean }) {
   )
 
   return (
-    <Section icon={<Gauge size={14} />} title="Speed" onReset={() => apply(1)}>
+    <Section icon={<Gauge size={14} />} title="Speed" onReset={() => apply(1)} extra={extra}>
       <div className="flex items-center gap-2">
         <div className="flex h-8 flex-1 items-stretch overflow-hidden rounded-md border border-line bg-bg focus-within:border-accent">
           {stepButton(-1)}

@@ -88,6 +88,8 @@ export interface PinTrack {
 
 export interface Stabilize {
   tracker_id: string
+  /** The Stabilize effect's on / off switch. */
+  enabled?: boolean
   mode: 'smooth' | 'lock'
   smoothness: number
   rotation: boolean
@@ -204,6 +206,8 @@ export interface Crop {
   top: number
   right: number
   bottom: number
+  /** The Crop effect's on / off switch (values are kept while off). */
+  enabled?: boolean
 }
 
 export interface TextStyle {
@@ -340,6 +344,8 @@ export interface Clip {
   stabilize?: Stabilize | null
   roto?: Roto | null
   shape?: ShapeStyle | null
+  /** Effects added from the Effects tab, in order (undefined = infer from settings). */
+  effects?: string[] | null
   /** Freeze frame: shows the source frame at in_point for the whole clip (silent). */
   hold?: boolean
   /** Clips sharing a link id are selected / moved / deleted together. */

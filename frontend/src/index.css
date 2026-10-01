@@ -74,3 +74,9 @@ input[type="range"] {
 .toast-in {
   animation: toast-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+
+/* A clip with an effect being dragged over it (Effects tab -> timeline). */
+[data-fx-over] {
+  outline: 2px solid var(--color-accent-2);
+  outline-offset: 1px;
+}
