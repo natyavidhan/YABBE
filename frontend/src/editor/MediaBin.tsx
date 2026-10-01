@@ -1,3 +1,4 @@
+import { AddShapeButton } from './Shapes'
 import { AlertTriangle, Film, Image as ImageIcon, Music, Plus, RotateCw, Trash2, Type, Upload } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
@@ -70,6 +71,7 @@ export function MediaBin({ projectId, onAdded }: { projectId: string; onAdded?: 
           >
             <Type size={13} /> Text
           </Button>
+          <AddShapeButton onAdded={onAdded} />
           <Button size="sm" onClick={() => fileRef.current?.click()}>
             <Upload size={13} /> Upload
           </Button>

@@ -23,7 +23,7 @@ from typing import Optional
 
 from .. import config
 from ..models import Asset, ChromaKey, Clip, Keyframe, Project
-from . import keyframes, media, nested, prerender, text, trackapply, transitions
+from . import keyframes, media, nested, prerender, shapes, text, trackapply, transitions
 from .cmdfile import Commands as _Commands
 
 EPS = 1e-6
@@ -110,6 +110,8 @@ def source_size(project: Project, clip: Clip, u: float = 0.0) -> Optional[tuple[
         if clip.text is None:
             return None
         return text.measure(keyframes.text_style_at(clip, u))
+    if clip.type == "shape":
+        return (round(clip.shape.width), round(clip.shape.height)) if clip.shape else None
     asset = project.asset(clip.asset_id)
     if asset is None or not asset.width or not asset.height:
         return None
@@ -126,7 +128,7 @@ def base_size(
     sw, sh = size
     cw, ch = sw * clip.crop.width_fraction(), sh * clip.crop.height_fraction()
     W, H = project.settings.width, project.settings.height
-    fit = 1.0 if clip.type == "text" else min(W / cw, H / ch)
+    fit = 1.0 if clip.type in ("text", "shape") else min(W / cw, H / ch)
     return cw * fit, ch * fit
 
 
@@ -280,11 +282,24 @@ def _add_video_input(
             return g.add_input("-f", "concat", "-safe", "0", "-i", str(seq)), [], (cw, ch)
         png, _, _ = text.render_text(keyframes.text_style_at(clip, vis.into))
         return g.add_input("-loop", "1", "-framerate", _num(fps), "-t", _num(vis.length + 1 / fps), "-i", str(png)), [], None
+    if clip.type == "shape":
+        if clip.shape is None:
+            return None
+        # Rasterised at the size it's shown (largest scale it reaches), so it stays sharp.
+        frames = clip.animated("scale")
+        most = max([kf.v for kf in frames] + [clip.transform.scale]) if frames else clip.transform.scale
+        png, _, _ = shapes.render(clip.shape, max(0.05, win.scale * most))
+        return g.add_input("-loop", "1", "-framerate", _num(fps), "-t", _num(vis.length + 1 / fps), "-i", str(png)), [], None
     if asset is None:
         return None
     path = _path_for(project, asset, win)
     if path is None:
         return None
+    if clip.hold and clip.type == "video":
+        # Freeze frame: one source frame at ``in_point``, held for the whole clip.
+        hold = vis.length + 2 / fps
+        return (g.add_input("-ss", _num(clip.in_point), "-t", _num(4 / fps), "-i", str(path)),
+                ["trim=end_frame=1", f"tpad=stop_mode=clone:stop_duration={hold:.4f}"], None)
     if asset.kind == "image":
         return g.add_input("-loop", "1", "-framerate", _num(fps), "-t", _num(vis.length + 1 / fps), "-i", str(path)), [], None
     pad = 2 / fps * clip.speed
@@ -484,7 +499,7 @@ def _roto_filters(g: Graph, project: Project, clip: Clip, vis: "_Visible", pre: 
 
     r = clip.roto
     asset = project.asset(clip.asset_id) if clip.asset_id else None
-    if r is None or not r.enabled or clip.type != "video" or asset is None:
+    if r is None or not r.enabled or clip.type != "video" or asset is None or clip.hold:
         return None
     k = roto.key(asset, r)
     meta = roto.load_meta(project.id, k)
@@ -614,7 +629,7 @@ def _video_layer(
         chain.append("vflip")
     rotating = rds is not None or abs(rot0 % 360) > EPS
     needs_alpha = (
-        clip.type in ("image", "text", "sequence") or op0 < 1 or bool(op_kf) or rotating or ss is not None or keyed
+        clip.type in ("image", "text", "sequence", "shape") or op0 < 1 or bool(op_kf) or rotating or ss is not None or keyed
         or bool(roto_chain)
     )
     if needs_alpha:
@@ -799,7 +814,7 @@ def build(project: Project, win: Window, stack: tuple[str, ...] = (), transparen
 
         # ---- picture ----------------------------------------------------------------
         if win.video and clip.is_visual and not track.hidden and (
-            asset is None or asset.has_video or asset.kind == "image" or clip.type == "text"
+            asset is None or asset.has_video or asset.kind == "image" or clip.type in ("text", "shape")
         ):
             a = max(clip.start, lo.get(clip.id, clip.start), win.t0)
             b = min(clip.end, hi.get(clip.id, clip.end), win.t1)
@@ -819,7 +834,7 @@ def build(project: Project, win: Window, stack: tuple[str, ...] = (), transparen
         audible = max(kf.v for kf in vol_frames) > 0 if vol_frames else clip.volume > 0
         if (
             win.audio and not track.muted and not clip.muted and audible and not clip.audio_detached
-            and clip.type in ("video", "audio", "sequence") and asset is not None and asset.has_audio
+            and clip.type in ("video", "audio", "sequence") and asset is not None and asset.has_audio and not clip.hold
         ):
             fade_in = audio_in.get(clip.id)
             fade_out = audio_out.get(clip.id)

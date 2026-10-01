@@ -39,6 +39,7 @@ import { toast } from '../components/toast'
 import { fillScale, sourceSize } from './geometry'
 import { allKeyTimes, EASES, framesOf, keyIndexAt, localTime, MARKER_COLORS, propAt, textStyleAt, visibleMarkers } from './keyframes'
 import { ProjectSettingsForm } from './ProjectSettings'
+import { ShapeSection } from './Shapes'
 import { MotionTrackingSection } from './Tracking'
 import { RotoSection } from './Roto'
 import { DEFAULT_KEY, useKeyView } from './ChromaKey'
@@ -207,7 +208,7 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
   const size = sourceSize(clip, assetMap, textSizes)
   const visual = clip.type !== 'audio'
   const hasAudio =
-    (clip.type === 'audio' || clip.type === 'video' || clip.type === 'sequence') && (asset?.has_audio ?? false) && !clip.audio_detached
+    (clip.type === 'audio' || clip.type === 'video' || clip.type === 'sequence') && (asset?.has_audio ?? false) && !clip.audio_detached && !clip.hold
   const scrub = { onScrubStart: beginGesture, onScrubEnd: endGesture }
   const playhead = useEditor((s) => s.playhead)
   // Animatable values shown/edited at the playhead (keyframed props auto-key).
@@ -229,7 +230,13 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
   }
 
   const title =
-    clip.type === 'text' ? 'Text' : (asset?.original_name ?? 'Missing media')
+    clip.type === 'text'
+      ? 'Text'
+      : clip.type === 'shape'
+        ? clip.shape
+          ? clip.shape.kind[0].toUpperCase() + clip.shape.kind.slice(1)
+          : 'Shape'
+        : `${clip.hold ? 'Freeze · ' : ''}${asset?.original_name ?? 'Missing media'}`
 
   // Changing duration/speed must not overlap the next clip or exceed the source.
   const setDuration = (d: number) => {
@@ -256,6 +263,12 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
       {locked && <div className="bg-warn/10 px-3 py-2 text-xs text-warn">This clip is on a locked track.</div>}
 
       {clip.type === 'text' && clip.text && <TextSection clip={clip} set={set} locked={locked} />}
+      {clip.type === 'shape' && <ShapeSection clip={clip} set={set} />}
+      {clip.hold && (
+        <p className="border-b border-line px-3 py-2 text-[11px] text-faint">
+          Freeze frame: shows one frame of the video (at {clip.in_point.toFixed(2)} s) for as long as the clip lasts.
+        </p>
+      )}
 
       <Section icon={<Timer size={14} />} title="Timing">
         <div className="grid grid-cols-2 gap-2">
@@ -289,7 +302,7 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
 
       {clip.type === 'sequence' && asset && <NestedSection clip={clip} asset={asset} />}
 
-      {(clip.type === 'video' || clip.type === 'audio' || clip.type === 'sequence') && <SpeedSection clip={clip} locked={locked} />}
+      {(clip.type === 'video' || clip.type === 'audio' || clip.type === 'sequence') && !clip.hold && <SpeedSection clip={clip} locked={locked} />}
 
       <MarkersSection clip={clip} locked={locked} />
 
@@ -453,9 +466,9 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
         <ChromaKeySection clip={clip} set={set} locked={locked} />
       )}
 
-      {clip.type === 'video' && asset && <RotoSection clip={clip} asset={asset} locked={locked} />}
+      {clip.type === 'video' && asset && !clip.hold && <RotoSection clip={clip} asset={asset} locked={locked} />}
 
-      {clip.type === 'video' && asset && <MotionTrackingSection clip={clip} asset={asset} locked={locked} />}
+      {clip.type === 'video' && asset && !clip.hold && <MotionTrackingSection clip={clip} asset={asset} locked={locked} />}
 
       {clip.audio_detached && (
         <Section icon={<Volume2 size={14} />} title="Audio">
@@ -1014,6 +1027,7 @@ const typeBadge: Record<Clip['type'], string> = {
   video: 'bg-clip-video/25 text-[#91a7ff]',
   image: 'bg-clip-image/25 text-[#66d9e8]',
   text: 'bg-clip-text/25 text-[#e599f7]',
+  shape: 'bg-clip-shape/25 text-[#ffc078]',
   audio: 'bg-clip-audio/25 text-[#8ce99a]',
   sequence: 'bg-clip-sequence/25 text-[#ffa94d]',
 }

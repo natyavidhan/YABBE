@@ -99,7 +99,7 @@ def sanitize_sequence(seq: Sequence, asset_ids: set[str], sequence_ids: Optional
     def ok(c) -> bool:
         if c.track_id not in track_ids:
             return False
-        if c.type == "text":
+        if c.type in ("text", "shape"):
             return True
         if c.type == "sequence":
             return sequence_ids is None or (c.sequence_id in sequence_ids and c.sequence_id != seq.id)

@@ -14,6 +14,7 @@ import {
   Unlink2,
   EyeOff,
   Flag,
+  Snowflake,
   AudioLines,
   Group,
   Ungroup,
@@ -277,7 +278,7 @@ export function Timeline({ projectId }: { projectId: string }) {
         const o = d.original
         const asset = assetMap.get(assetKey(o) ?? '')
         const others = clipsNow.filter((c) => c.track_id === o.track_id && c.id !== o.id)
-        const hasSource = o.type === 'video' || o.type === 'audio' || o.type === 'sequence'
+        const hasSource = (o.type === 'video' && !o.hold) || o.type === 'audio' || o.type === 'sequence'
         if (d.kind === 'trim-start') {
           const prevEnd = Math.max(0, ...others.filter((c) => clipEnd(c) <= o.start + 1e-6).map(clipEnd))
           const lower = Math.max(prevEnd, hasSource ? o.start - o.in_point / o.speed : 0)
@@ -864,6 +865,9 @@ function Toolbar({ compact }: { compact: boolean }) {
       <IconButton label="Unlink (Ctrl+Shift+L)" onClick={() => s.unlinkSelected()} disabled={!canUnlink}>
         <Unlink2 size={15} />
       </IconButton>
+      <IconButton label="Freeze frame at the playhead (F)" onClick={freezeAtPlayhead}>
+        <Snowflake size={15} />
+      </IconButton>
       <IconButton label="Nest selected clips into a sequence" onClick={nestSelected} disabled={!hasSelection}>
         <Group size={15} />
       </IconButton>
@@ -951,6 +955,7 @@ const CLIP_COLORS: Record<Clip['type'], string> = {
   video: 'bg-clip-video/80 border-clip-video',
   image: 'bg-clip-image/80 border-clip-image',
   text: 'bg-clip-text/80 border-clip-text',
+  shape: 'bg-clip-shape/80 border-clip-shape',
   audio: 'bg-clip-audio/80 border-clip-audio',
   sequence: 'bg-clip-sequence/80 border-clip-sequence',
 }
@@ -985,18 +990,20 @@ const TimelineClip = memo(function TimelineClip({
   const label =
     clip.type === 'text'
       ? (clip.text?.content.split('\n')[0] ?? 'Text')
-      : (asset?.original_name ?? (clip.type === 'sequence' ? 'Missing sequence' : 'Missing media'))
+      : clip.type === 'shape'
+        ? (clip.shape ? clip.shape.kind[0].toUpperCase() + clip.shape.kind.slice(1) : 'Shape')
+        : `${clip.hold ? 'Freeze · ' : ''}${asset?.original_name ?? (clip.type === 'sequence' ? 'Missing sequence' : 'Missing media')}`
   const ready = asset?.status === 'ready'
   const bodyH = height - 4 - 16
   const roomy = bodyH >= 10 // collapsed tracks show a slim labelled bar only
   const showFilm = roomy && ready && (clip.type === 'video' || clip.type === 'image') && asset!.thumb_count > 0
-  const showWave = roomy && ready && asset!.has_audio && (clip.type === 'audio' || (clip.type === 'video' && !clip.audio_detached))
+  const showWave = roomy && ready && asset!.has_audio && (clip.type === 'audio' || (clip.type === 'video' && !clip.audio_detached && !clip.hold))
 
   return (
     <div
       className={`absolute top-0.5 overflow-hidden rounded-md border ${CLIP_COLORS[clip.type]} ${
         selected ? 'z-[5] ring-2 ring-white/90' : ''
-      } ${locked ? 'cursor-not-allowed' : 'cursor-grab active:cursor-grabbing'} ${!asset && clip.type !== 'text' ? 'opacity-50' : ''}`}
+      } ${locked ? 'cursor-not-allowed' : 'cursor-grab active:cursor-grabbing'} ${!asset && clip.type !== 'text' && clip.type !== 'shape' ? 'opacity-50' : ''}`}
       // Selected clips capture touch (drag to move); others let the timeline scroll.
       style={{ left, width, height: height - 4, touchAction: selected ? 'none' : 'pan-x pan-y' }}
       onPointerDown={(e) => onDown(e, clip, 'body')}
@@ -1006,6 +1013,7 @@ const TimelineClip = memo(function TimelineClip({
     >
       <div className="flex h-4 items-center gap-1 overflow-hidden px-1.5 text-[10px] leading-4 font-medium whitespace-nowrap text-white/95">
         {clip.type === 'sequence' && <Clapperboard size={10} className="shrink-0" aria-label="Sequence" />}
+        {clip.hold && <Snowflake size={10} className="shrink-0" aria-label="Freeze frame" />}
         {linked && <Link2 size={10} className="shrink-0" aria-label="Linked" />}
         {clip.muted && <VolumeX size={10} />}
         <span className="truncate">{label}</span>
@@ -1080,6 +1088,11 @@ function NestedThumb({ sequenceId, height, width, aspect }: { sequenceId?: strin
   const w = Math.min(height * aspect, width - 4)
   if (!src || w < 12) return null
   return <img src={src} alt="" draggable={false} className="absolute top-0 left-0 object-cover opacity-80" style={{ height, width: w }} />
+}
+
+function freezeAtPlayhead() {
+  const err = useEditor.getState().freezeFrame()
+  if (err) toast.info(err)
 }
 
 function nestSelected() {
@@ -1162,6 +1175,9 @@ function ClipMenu({ x, y, onClose }: { x: number; y: number; onClose: () => void
         ...(detached ? [{ label: 'Restore audio', icon: <Volume2 size={13} />, onSelect: () => s.restoreAudio(detached.id) }] : []),
         'divider',
         { label: 'Split at playhead', icon: <Scissors size={13} />, shortcut: 'S', onSelect: () => s.splitAtPlayhead() },
+        ...(selected.some((c) => c.type === 'video' && !c.hold)
+          ? [{ label: 'Freeze frame at playhead', icon: <Snowflake size={13} />, shortcut: 'F', onSelect: () => freezeAtPlayhead() }]
+          : []),
         { label: 'Duplicate', icon: <Copy size={13} />, shortcut: 'Ctrl+D', onSelect: () => s.duplicateSelected() },
         'divider',
         {
@@ -1432,7 +1448,7 @@ function Filmstrip({
   for (let i = 0; i < count; i++) {
     let idx = 0
     if (clip.type === 'video' && asset.thumb_interval > 0) {
-      const srcT = clip.in_point + ((i * tileW) / zoom) * clip.speed
+      const srcT = clip.hold ? clip.in_point : clip.in_point + ((i * tileW) / zoom) * clip.speed
       idx = clamp(Math.floor(srcT / asset.thumb_interval), 0, asset.thumb_count - 1)
     }
     tiles.push(

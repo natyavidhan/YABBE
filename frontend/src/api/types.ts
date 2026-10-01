@@ -142,6 +142,26 @@ export interface RotoStatus {
   error: string | null
 }
 
+export type ShapeKind = 'rectangle' | 'ellipse' | 'triangle' | 'polygon' | 'star' | 'line' | 'arrow'
+
+/** A vector shape clip (size in project pixels). */
+export interface ShapeStyle {
+  kind: ShapeKind
+  width: number
+  height: number
+  /** null = no fill */
+  fill: string | null
+  /** outline colour (lines: the line); null = none */
+  stroke: string | null
+  stroke_width: number
+  /** rectangle corner rounding, fraction of the shorter side (0..0.5) */
+  radius: number
+  /** polygon sides / star points */
+  sides: number
+  /** star: inner / outer radius */
+  inner: number
+}
+
 export interface ChromaKey {
   enabled: boolean
   /** The screen colour (#rrggbb). */
@@ -199,7 +219,7 @@ export interface TextStyle {
   line_spacing: number
 }
 
-export type ClipType = 'video' | 'audio' | 'image' | 'text' | 'sequence'
+export type ClipType = 'video' | 'audio' | 'image' | 'text' | 'sequence' | 'shape'
 
 export type AnimProp =
   | 'x'
@@ -311,6 +331,9 @@ export interface Clip {
   pin?: PinTrack | null
   stabilize?: Stabilize | null
   roto?: Roto | null
+  shape?: ShapeStyle | null
+  /** Freeze frame: shows the source frame at in_point for the whole clip (silent). */
+  hold?: boolean
   /** Clips sharing a link id are selected / moved / deleted together. */
   link?: string | null
 }

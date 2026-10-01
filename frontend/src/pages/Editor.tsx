@@ -517,6 +517,7 @@ const SHORTCUTS: [string, string][] = [
   ['← / →', 'Previous / next frame (Shift: 1 s)'],
   ['Home / End', 'Jump to start / end'],
   ['S or Ctrl+B', 'Split at playhead'],
+  ['F', 'Freeze frame at playhead'],
   ['Delete', 'Delete selected clips'],
   ['Ctrl+D', 'Duplicate selected clips'],
   ['Ctrl+A', 'Select all clips'],

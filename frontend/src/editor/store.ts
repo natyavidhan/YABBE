@@ -1,7 +1,8 @@
 import { create } from 'zustand'
-import type { AnimProp, Asset, Clip, ClipType, Ease, Keyframe, Marker, Sequence, Transition, Project, ProjectSettings, TextStyle, Timeline, Track, TrackKind } from '../api/types'
+import type { AnimProp, Asset, Clip, ClipType, Ease, Keyframe, Marker, Sequence, Transition, Project, ProjectSettings, ShapeKind, ShapeStyle, TextStyle, Timeline, Track, TrackKind } from '../api/types'
 import { clamp, uid } from '../lib/format'
 import { recalcAuto } from './graph/model'
+import { freezeFrame as freezeClips } from './freeze'
 import { nestClips, unnestClip } from './nesting'
 import { colorPropAt, shiftMarkers, visibleMarkers, framesOf, isColorProp, keyIndexAt, localTime, propAt, shiftKeyframes, staticColor, staticValue, TEXT_COLOR, TEXT_NUMERIC, upsertKey } from './keyframes'
 
@@ -102,6 +103,18 @@ const HISTORY_LIMIT = 200
 export const MIN_CLIP = 0.04 // seconds
 export const DEFAULT_IMAGE_DURATION = 5
 export const DEFAULT_TEXT_DURATION = 5
+
+export const DEFAULT_SHAPE: ShapeStyle = {
+  kind: 'rectangle',
+  width: 400,
+  height: 400,
+  fill: '#7c5cff',
+  stroke: null,
+  stroke_width: 0,
+  radius: 0,
+  sides: 6,
+  inner: 0.45,
+}
 
 export const DEFAULT_TEXT: TextStyle = {
   content: 'Your text',
@@ -229,6 +242,10 @@ interface EditorState {
   removeMarker: (clipId: string, markerId: string) => void
   addAssetClip: (asset: Asset, opts?: { trackId?: string; start?: number }) => string | null
   addTextClip: () => string
+  /** Add a shape at the playhead (top video track). */
+  addShapeClip: (kind: ShapeKind) => string
+  /** Freeze the frame under the playhead. Error message or null. */
+  freezeFrame: () => string | null
   moveClip: (id: string, start: number, trackId: string) => void
   splitAtPlayhead: () => void
   deleteSelected: () => void
@@ -406,7 +423,7 @@ export function trackKindFor(type: ClipType): TrackKind {
 /** Max timeline length a clip can have given its source (for nested sequences the
  * virtual asset's duration). Infinity for stills/text. */
 export function maxClipDuration(clip: Clip, asset: Asset | undefined): number {
-  if (clip.type === 'text' || clip.type === 'image' || !asset) return Infinity
+  if (clip.type === 'text' || clip.type === 'image' || clip.type === 'shape' || clip.hold || !asset) return Infinity
   return Math.max(MIN_CLIP, (asset.duration - clip.in_point) / clip.speed)
 }
 
@@ -1049,6 +1066,42 @@ export const useEditor = create<EditorState>((set, get) => {
       return clip.id
     },
 
+    addShapeClip: (kind) => {
+      const { doc, playhead } = get()
+      let tracks = doc.tracks
+      let track = doc.tracks.find((t) => t.kind === 'video' && !t.locked)
+      if (!track) {
+        track = { id: uid('t_'), kind: 'video', name: 'Shapes', muted: false, hidden: false, locked: false }
+        tracks = [track, ...tracks]
+      }
+      const start = findFreeStart(doc.clips, track.id, playhead, DEFAULT_TEXT_DURATION)
+      const size = Math.round(Math.min(doc.settings.width, doc.settings.height) / 3)
+      const line = kind === 'line' || kind === 'arrow'
+      const shape: ShapeStyle = {
+        ...DEFAULT_SHAPE,
+        kind,
+        width: line ? size * 2 : kind === 'rectangle' ? Math.round(size * 1.6) : size,
+        height: line ? Math.max(4, Math.round(size / 12)) : size,
+        fill: line ? null : DEFAULT_SHAPE.fill,
+        stroke: line ? '#ffffff' : null,
+        stroke_width: line ? Math.max(4, Math.round(size / 12)) : 0,
+        sides: kind === 'star' ? 5 : 6,
+      }
+      const clip = makeClip({ track_id: track.id, type: 'shape', start, duration: DEFAULT_TEXT_DURATION, shape })
+      change((d) => ({ ...d, tracks, clips: [...d.clips, clip] }))
+      set({ selection: [clip.id] })
+      return clip.id
+    },
+
+    freezeFrame: () => {
+      const { doc, selection, playhead } = get()
+      const r = freezeClips(doc, selection, playhead)
+      if (typeof r === 'string') return r
+      change(() => r.doc)
+      set({ selection: [r.clipId], transSel: null })
+      return null
+    },
+
     moveClip: (id, start, trackId) =>
       setClips((clips) => clips.map((c) => (c.id === id ? { ...c, start: Math.max(0, start), track_id: trackId } : c))),
 
@@ -1076,7 +1129,7 @@ export const useEditor = create<EditorState>((set, get) => {
             id: uid('c_'),
             start: t,
             duration: c.duration - left,
-            in_point: c.in_point + left * c.speed,
+            in_point: c.hold ? c.in_point : c.in_point + left * c.speed, // a freeze keeps its frame
             fade_in: 0,
             keyframes: shiftKeyframes(c.keyframes, -left) ?? {},
             markers: shiftMarkers((c.markers ?? []).filter((m) => !inFirst(m)), -left),

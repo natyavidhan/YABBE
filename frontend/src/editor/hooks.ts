@@ -166,6 +166,10 @@ export function useShortcuts() {
       else if (e.key === '-') s.setZoom(s.zoom / 1.25)
       else if (key === 'g') s.setGraphOpen(!s.graphOpen)
       else if (key === 't') s.addTextClip()
+      else if (key === 'f' && !mod) {
+        const err = s.freezeFrame()
+        if (err) toast.info(err)
+      }
       else if (key === 'm') {
         const err = s.addMarker()
         if (err) toast.info(err)

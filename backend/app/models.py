@@ -109,7 +109,7 @@ class TextStyle(_Model):
     line_spacing: float = Field(1.2, ge=0.5, le=4)
 
 
-ClipType = Literal["video", "audio", "image", "text", "sequence"]
+ClipType = Literal["video", "audio", "image", "text", "sequence", "shape"]
 # How a clip's picture combines with what's below it (Photoshop / Premiere names).
 BlendMode = Literal[
     "normal",
@@ -182,6 +182,23 @@ class Stabilize(_Model):
     rotation: bool = True
     scale: bool = False
     auto_zoom: bool = True  # scale up just enough to hide the moving edges
+
+
+ShapeKind = Literal["rectangle", "ellipse", "triangle", "polygon", "star", "line", "arrow"]
+
+
+class ShapeStyle(_Model):
+    """A vector shape clip, drawn at its size in project pixels (engine/shapes.py)."""
+
+    kind: ShapeKind = "rectangle"
+    width: float = Field(400, ge=1, le=8000)
+    height: float = Field(400, ge=1, le=8000)
+    fill: Optional[str] = Field("#7c5cff", pattern=r"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$")  # None = no fill
+    stroke: Optional[str] = Field(None, pattern=r"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$")  # outline (lines: the line)
+    stroke_width: float = Field(0, ge=0, le=500)
+    radius: float = Field(0, ge=0, le=0.5)  # rectangle: corner rounding, fraction of the shorter side
+    sides: int = Field(6, ge=3, le=24)  # polygon sides / star points
+    inner: float = Field(0.45, ge=0.05, le=0.95)  # star: inner radius / outer radius
 
 
 class RotoPrompt(_Model):
@@ -328,6 +345,9 @@ class Clip(_Model):
     pin: Optional[PinTrack] = None
     stabilize: Optional[Stabilize] = None
     roto: Optional[Roto] = None
+    shape: Optional[ShapeStyle] = None
+    # Freeze frame: show the source frame at ``in_point`` for the whole clip (silent).
+    hold: bool = False
     # The sound was separated into its own audio clip: this clip is silent.
     audio_detached: bool = False
     # Clips sharing a link id are selected / moved / deleted together (editor only).
@@ -372,7 +392,7 @@ class Clip(_Model):
 
     @property
     def is_visual(self) -> bool:
-        return self.type in ("video", "image", "text", "sequence")
+        return self.type in ("video", "image", "text", "sequence", "shape")
 
 
 class Sequence(_Model):
