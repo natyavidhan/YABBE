@@ -454,7 +454,7 @@ export function findFreeStart(clips: Clip[], trackId: string, wanted: number, du
   return start
 }
 
-function makeClip(partial: Partial<Clip> & Pick<Clip, 'track_id' | 'type'>): Clip {
+export function makeClip(partial: Partial<Clip> & Pick<Clip, 'track_id' | 'type'>): Clip {
   return {
     id: uid('c_'),
     asset_id: null,

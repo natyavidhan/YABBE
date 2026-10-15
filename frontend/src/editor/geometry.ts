@@ -46,12 +46,12 @@ export function layerOf(
   textSizes: Record<string, { width: number; height: number }>,
   time?: number,
 ): Layer | null {
-  const size = sourceSize(clip, assets, textSizes, time)
+  const size = clip.type === 'lyrics' ? { width: settings.width, height: settings.height } : sourceSize(clip, assets, textSizes, time)
   const tr = time === undefined ? clip.transform : transformAt(clip, time)
   if (!size) return null
   const cw = size.width * Math.max(0.01, 1 - clip.crop.left - clip.crop.right)
   const ch = size.height * Math.max(0.01, 1 - clip.crop.top - clip.crop.bottom)
-  const fit = clip.type === 'text' || clip.type === 'shape' ? 1 : Math.min(settings.width / cw, settings.height / ch)
+  const fit = clip.type === 'text' || clip.type === 'shape' || clip.type === 'lyrics' ? 1 : Math.min(settings.width / cw, settings.height / ch)
   const bw = cw * fit
   const bh = ch * fit
   const s = tr.scale

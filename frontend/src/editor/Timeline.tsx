@@ -46,6 +46,7 @@ import { useInspectorTab } from './inspectorTab'
 import { RenderBadge } from './Renders'
 import { unnestBlocker } from './nesting'
 import { useSequenceThumb } from './SequenceThumb'
+import { timelineTime, useLyricsJobs, visibleLines } from './lyrics'
 import { SEQUENCE_MIME } from './Sequences'
 import { ContextMenu } from '../components/ContextMenu'
 import { useTransitionCatalog } from './transitionCatalog'
@@ -960,6 +961,7 @@ const CLIP_COLORS: Record<Clip['type'], string> = {
   shape: 'bg-clip-shape/80 border-clip-shape',
   audio: 'bg-clip-audio/80 border-clip-audio',
   sequence: 'bg-clip-sequence/80 border-clip-sequence',
+  lyrics: 'bg-clip-lyrics/80 border-clip-lyrics',
 }
 
 const TimelineClip = memo(function TimelineClip({
@@ -994,7 +996,9 @@ const TimelineClip = memo(function TimelineClip({
       ? (clip.text?.content.split('\n')[0] ?? 'Text')
       : clip.type === 'shape'
         ? (clip.shape ? clip.shape.kind[0].toUpperCase() + clip.shape.kind.slice(1) : 'Shape')
-        : `${clip.hold ? 'Freeze · ' : ''}${asset?.original_name ?? (clip.type === 'sequence' ? 'Missing sequence' : 'Missing media')}`
+        : clip.type === 'lyrics'
+          ? `Lyrics · ${asset?.original_name ?? 'missing song'}`
+          : `${clip.hold ? 'Freeze · ' : ''}${asset?.original_name ?? (clip.type === 'sequence' ? 'Missing sequence' : 'Missing media')}`
   const ready = asset?.status === 'ready'
   const bodyH = height - 4 - 16
   const roomy = bodyH >= 10 // collapsed tracks show a slim labelled bar only
@@ -1056,6 +1060,7 @@ const TimelineClip = memo(function TimelineClip({
         {clip.type === 'text' && (
           <div className="truncate px-1.5 text-[11px] text-white/70 italic">{clip.text?.font}</div>
         )}
+        {clip.type === 'lyrics' && roomy && <LyricsStrip clip={clip} zoom={zoom} width={width} height={bodyH} />}
         {clip.type === 'sequence' && bodyH >= 14 && <NestedThumb sequenceId={clip.sequence_id} height={bodyH} width={width} aspect={asset ? asset.width / asset.height : 16 / 9} />}
         {showWave && (
           <div className="absolute inset-x-0 bottom-0" style={{ height: clip.type === 'video' ? 12 : bodyH }}>
@@ -1568,4 +1573,37 @@ function Waveform({
   }, [peaks, cw, width, height, zoom, clip.in_point, clip.speed, clip.volume, clip.type])
 
   return <canvas ref={ref} className="pointer-events-none h-full" style={{ width }} />
+}
+
+
+/** The lines of a lyrics clip, where they're sung. */
+function LyricsStrip({ clip, zoom, width, height }: { clip: Clip; zoom: number; width: number; height: number }) {
+  const job = useLyricsJobs((s) => s.jobs[clip.id])
+  const offset = (clip.lyrics?.style?.offset_ms ?? 0) / 1000
+  const lines = visibleLines(clip)
+  if (!lines.length) {
+    return (
+      <div className="truncate px-1.5 text-[10px] text-white/70 italic">
+        {job?.error ? 'Couldn’t get the lyrics' : job ? `${job.message || 'Finding lyrics'}… ${Math.round(job.progress * 100)}%` : 'No lyrics yet'}
+      </div>
+    )
+  }
+  return (
+    <div className="pointer-events-none absolute inset-0" style={{ height }}>
+      {lines.map((l, i) => {
+        const left = (timelineTime(clip, l.start + offset) - clip.start) * zoom
+        const right = (timelineTime(clip, l.end + offset) - clip.start) * zoom
+        if (right < 0 || left > width) return null
+        return (
+          <div
+            key={i}
+            className="absolute top-0.5 truncate rounded-sm bg-black/25 px-1 text-[10px] leading-4 text-white/90"
+            style={{ left: Math.max(0, left), width: Math.max(4, Math.min(width, right) - Math.max(0, left)) }}
+          >
+            {l.text}
+          </div>
+        )
+      })}
+    </div>
+  )
 }

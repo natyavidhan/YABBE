@@ -8,7 +8,7 @@ import { allSequences, sequenceAsset, useEditor } from './store'
 
 const CATEGORY_ORDER: EffectDef['category'][] = ['Picture', 'Time', 'Keying & masks', 'Motion', 'Audio']
 const KIND_SHORT: Record<ClipType, string> = {
-  video: 'Video', image: 'Photo', audio: 'Audio', text: 'Text', shape: 'Shape', sequence: 'Nested',
+  video: 'Video', image: 'Photo', audio: 'Audio', text: 'Text', shape: 'Shape', sequence: 'Nested', lyrics: 'Lyrics',
 }
 
 /** The Effects tab: browse effects, drag them onto clips (or add to the selection). */

@@ -40,6 +40,7 @@ import { fillScale, sourceSize } from './geometry'
 import { allKeyTimes, EASES, framesOf, keyIndexAt, localTime, MARKER_COLORS, propAt, textStyleAt, visibleMarkers } from './keyframes'
 import { ProjectSettingsForm } from './ProjectSettings'
 import { ShapeSection } from './Shapes'
+import { LyricsSection, LyricsToggle } from './Lyrics'
 import { addEffect, EFFECT_MIME, effectDef, effectsOf, removeEffect, setEffectEnabled, type EffectId } from './effects'
 import { EffectsPanel } from './EffectsPanel'
 import { useInspectorTab } from './inspectorTab'
@@ -104,7 +105,13 @@ export function Inspector() {
 function ClipOrProjectInspector() {
   const seqName = useEditor((s) => s.doc.sequences.find((x) => x.id === s.doc.active)?.name ?? 'Sequence')
   const selection = useEditor((s) => s.selection)
-  const clip = useEditor((s) => (s.selection.length === 1 ? s.doc.clips.find((c) => c.id === s.selection[0]) : undefined))
+  // One clip, or one linked group (e.g. a song and its lyrics): the clip that was clicked.
+  const clip = useEditor((s) => {
+    const first = s.doc.clips.find((c) => c.id === s.selection[0])
+    if (s.selection.length === 1 || !first?.link) return s.selection.length === 1 ? first : undefined
+    const group = s.selection.every((id) => s.doc.clips.find((c) => c.id === id)?.link === first.link)
+    return group ? first : undefined
+  })
   const doc = useEditor((s) => s.doc)
   const assets = useEditor((s) => s.assets)
   const asset = useMemo(() => {
@@ -116,7 +123,7 @@ function ClipOrProjectInspector() {
     return clip.asset_id ? assets.find((a) => a.id === clip.asset_id) : undefined
   }, [clip, doc, assets])
 
-  if (selection.length > 1)
+  if (selection.length > 1 && !clip)
     return (
       <Empty icon={<MousePointerClick size={18} />} title={`${selection.length} clips selected`}>
         Drag them together on the timeline, or press Delete / Ctrl+D.
@@ -264,7 +271,9 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
         ? clip.shape
           ? clip.shape.kind[0].toUpperCase() + clip.shape.kind.slice(1)
           : 'Shape'
-        : `${clip.hold ? 'Freeze · ' : ''}${asset?.original_name ?? 'Missing media'}`
+        : clip.type === 'lyrics'
+          ? `Lyrics · ${asset?.original_name ?? 'missing song'}`
+          : `${clip.hold ? 'Freeze · ' : ''}${asset?.original_name ?? 'Missing media'}`
 
   // Changing duration/speed must not overlap the next clip or exceed the source.
   const setDuration = (d: number) => {
@@ -294,6 +303,7 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
       {clip.type === 'shape' && (
         <ShapeSection clip={clip} set={set} locked={locked} keyBtn={(p) => <KeyButton clip={clip} prop={p} disabled={locked} />} />
       )}
+      {clip.type === 'lyrics' && <LyricsSection clip={clip} asset={asset} locked={locked} />}
       {clip.hold && (
         <p className="border-b border-line px-3 py-2 text-[11px] text-faint">
           Freeze frame: shows one frame of the video (at {clip.in_point.toFixed(2)} s) for as long as the clip lasts.
@@ -304,7 +314,7 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
         <div className="grid grid-cols-2 gap-2">
           <NumberInput label="Start" value={clip.start} onChange={setStart} step={0.1} min={0} precision={2} suffix="s" {...scrub} scrubScale={0.2} />
           <NumberInput label="Length" value={clip.duration} onChange={setDuration} step={0.1} min={MIN_CLIP} precision={2} suffix="s" {...scrub} scrubScale={0.2} />
-          {(clip.type === 'video' || clip.type === 'audio' || clip.type === 'sequence') && (
+          {(clip.type === 'video' || clip.type === 'audio' || clip.type === 'sequence' || clip.type === 'lyrics') && (
             <>
               <NumberInput
                 label="In"
@@ -438,7 +448,7 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
               <FlipVertical2 size={15} />
             </IconButton>
             <div className="flex-1" />
-            {clip.type !== 'text' && (
+            {clip.type !== 'text' && clip.type !== 'lyrics' && (
               <>
                 <button
                   className="flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted hover:bg-raised hover:text-fg"
@@ -511,6 +521,7 @@ function ClipInspector({ clip, asset }: { clip: Clip; asset: Asset | undefined }
               <AudioLines size={12} /> Separate audio
             </button>
           )}
+          <LyricsToggle clip={clip} asset={asset} locked={locked} />
         </Section>
       )}
 
@@ -1137,6 +1148,7 @@ const typeBadge: Record<Clip['type'], string> = {
   shape: 'bg-clip-shape/25 text-[#ffc078]',
   audio: 'bg-clip-audio/25 text-[#8ce99a]',
   sequence: 'bg-clip-sequence/25 text-[#ffa94d]',
+  lyrics: 'bg-clip-lyrics/25 text-[#f783ac]',
 }
 
 let fontsPromise: Promise<string[]> | null = null

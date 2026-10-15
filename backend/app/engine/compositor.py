@@ -24,6 +24,7 @@ from typing import Optional
 from .. import config
 from ..models import Asset, ChromaKey, Clip, Keyframe, Project
 from . import keyframes, media, nested, prerender, shapes, text, trackapply, transitions
+from .lyrics import ass as lyrics_ass
 from .cmdfile import Commands as _Commands
 
 EPS = 1e-6
@@ -115,6 +116,8 @@ def source_size(project: Project, clip: Clip, u: float = 0.0) -> Optional[tuple[
             return None
         s = keyframes.shape_style_at(clip, u)
         return round(s.width), round(s.height)
+    if clip.type == "lyrics":  # drawn on a canvas the size of the sequence
+        return project.settings.width, project.settings.height
     asset = project.asset(clip.asset_id)
     if asset is None or not asset.width or not asset.height:
         return None
@@ -131,7 +134,7 @@ def base_size(
     sw, sh = size
     cw, ch = sw * clip.crop.width_fraction(), sh * clip.crop.height_fraction()
     W, H = project.settings.width, project.settings.height
-    fit = 1.0 if clip.type in ("text", "shape") else min(W / cw, H / ch)
+    fit = 1.0 if clip.type in ("text", "shape", "lyrics") else min(W / cw, H / ch)
     return cw * fit, ch * fit
 
 
@@ -299,6 +302,8 @@ def _add_video_input(
             return g.add_input("-f", "concat", "-safe", "0", "-i", str(seq)), [], (cw, ch)
         png, _, _ = shapes.render(keyframes.shape_style_at(clip, vis.into), factor)
         return g.add_input("-loop", "1", "-framerate", _num(fps), "-t", _num(vis.length + 1 / fps), "-i", str(png)), [], None
+    if clip.type == "lyrics":
+        return _add_lyrics_input(g, project, clip, vis, win)
     if asset is None:
         return None
     path = _path_for(project, asset, win)
@@ -327,6 +332,33 @@ def _add_video_input(
             f"tpad=start_mode=clone:start_duration={pre:.4f}:stop_mode=clone:stop_duration={post:.4f}"
         )
     return g.add_input("-ss", _num(start), "-t", _num(read + pad), "-i", str(path)), extra, None
+
+
+def _add_lyrics_input(
+    g: Graph, project: Project, clip: Clip, vis: _Visible, win: Window,
+) -> Optional[tuple[int, list[str], Optional[tuple[int, int]]]]:
+    """Lyrics: libass draws them (timed in song time) on a transparent canvas,
+    generated at ``fps × speed`` so that after the clip's speed is applied the
+    frames land on the sequence's frame rate."""
+    if clip.lyrics is None or not clip.lyrics.lines:
+        return None
+    st = project.settings
+    fps = st.fps
+    pad = 2 / fps * clip.speed
+    script = lyrics_ass.write(clip.lyrics, st.width, st.height)
+    fonts = lyrics_ass.fonts_dir()
+    ass = f"ass=filename={_lavfi_path(script)}:alpha=1" + (f":fontsdir={_lavfi_path(fonts)}" if fonts else "")
+    # the script is in song time: shift the canvas to it for libass, then back
+    src = (f"color=c=black@0:s={_even(st.width * win.scale)}x{_even(st.height * win.scale)}"
+           f":r={_num(fps * clip.speed)}:d={_num(vis.src_len + pad)},format=rgba,"
+           f"setpts=PTS+{_num(vis.src_in)}/TB,{ass},setpts=PTS-STARTPTS")
+    return g.add_input("-f", "lavfi", "-i", src), [], None
+
+
+def _lavfi_path(p: Path) -> str:
+    """A path as a filter option inside a lavfi graph (two levels of escaping)."""
+    s = re.sub(r"([\\':])", r"\\\1", str(p))  # the filter option value
+    return re.sub(r"([\\',;\[\]])", r"\\\1", s)  # the graph around it
 
 
 def _add_nested_input(
@@ -638,7 +670,7 @@ def _video_layer(
         chain.append("vflip")
     rotating = rds is not None or abs(rot0 % 360) > EPS
     needs_alpha = (
-        clip.type in ("image", "text", "sequence", "shape") or op0 < 1 or bool(op_kf) or rotating or ss is not None or keyed
+        clip.type in ("image", "text", "sequence", "shape", "lyrics") or op0 < 1 or bool(op_kf) or rotating or ss is not None or keyed
         or bool(roto_chain)
     )
     if needs_alpha:
@@ -823,7 +855,7 @@ def build(project: Project, win: Window, stack: tuple[str, ...] = (), transparen
 
         # ---- picture ----------------------------------------------------------------
         if win.video and clip.is_visual and not track.hidden and (
-            asset is None or asset.has_video or asset.kind == "image" or clip.type in ("text", "shape")
+            asset is None or asset.has_video or asset.kind == "image" or clip.type in ("text", "shape", "lyrics")
         ):
             a = max(clip.start, lo.get(clip.id, clip.start), win.t0)
             b = min(clip.end, hi.get(clip.id, clip.end), win.t1)

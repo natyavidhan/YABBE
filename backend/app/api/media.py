@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from .. import storage
 from ..engine import ffmpeg, media
+from ..engine.lyrics import pipeline as lyrics_pipeline
 from ..jobs import JobContext, jobs
 from ..models import Asset, Project, new_id
 from .deps import get_project
@@ -161,6 +162,7 @@ def delete_asset(project_id: str, asset_id: str):
     storage.update(project_id, apply)
     (storage.media_dir(project_id) / asset.filename).unlink(missing_ok=True)
     media.clear_derived(project_id, asset_id)
+    lyrics_pipeline.clear(project_id, asset_id)
     return {"ok": True}
 
 

@@ -28,6 +28,8 @@ export interface Asset {
   /** Made by the editor (e.g. a freeze frame): not listed in the media bin. */
   hidden?: boolean
   created_at: number
+  song_title?: string | null
+  song_artist?: string | null
 }
 
 export type TrackKind = 'video' | 'audio'
@@ -225,7 +227,75 @@ export interface TextStyle {
   line_spacing: number
 }
 
-export type ClipType = 'video' | 'audio' | 'image' | 'text' | 'sequence' | 'shape'
+export type ClipType = 'video' | 'audio' | 'image' | 'text' | 'sequence' | 'shape' | 'lyrics'
+
+export interface LyricWord {
+  text: string
+  /** Song time (s). */
+  start: number
+  end: number
+  /** How sure the timing is (0 = guessed: spread over the line). */
+  conf?: number
+}
+
+export interface LyricLine {
+  text: string
+  start: number
+  end: number
+  words: LyricWord[]
+}
+
+export type LyricsLayout = 'line' | 'stack' | 'scroll' | 'words' | 'page'
+export type LyricsWordFx = 'fill' | 'highlight' | 'reveal' | 'pop' | 'fade' | 'bounce' | 'glow' | 'none'
+export type LyricsLineFx = 'none' | 'fade' | 'slide_up' | 'slide_down' | 'slide_left' | 'zoom' | 'blur' | 'drop'
+
+export interface LyricsStyle {
+  preset: string
+  layout: LyricsLayout
+  lines_shown: number
+  words_shown: number
+  word_fx: LyricsWordFx
+  line_in: LyricsLineFx
+  line_out: LyricsLineFx
+  transition_ms: number
+  font: string
+  size: number
+  bold: boolean
+  italic: boolean
+  case: 'as_is' | 'upper' | 'lower' | 'title'
+  letter_spacing: number
+  line_spacing: number
+  color: string
+  upcoming_color: string
+  past_color: string
+  other_lines_opacity: number
+  outline_color: string
+  outline: number
+  shadow_color: string
+  shadow: number
+  blur: number
+  box: 'none' | 'line' | 'words' | 'active'
+  box_color: string
+  box_padding: number
+  active_box_color: string | null
+  active_scale: number
+  active_color: string | null
+  align: 'left' | 'center' | 'right'
+  anchor: 'top' | 'middle' | 'bottom'
+  margin: number
+  width: number
+  offset_ms: number
+  lead_ms: number
+  hold_ms: number
+}
+
+export interface Lyrics {
+  lines: LyricLine[]
+  style: LyricsStyle
+  source?: string | null
+  /** Vocals isolated before timing (slower, better on dense mixes). */
+  isolate?: boolean
+}
 
 export type AnimProp =
   | 'x'
@@ -350,6 +420,8 @@ export interface Clip {
   hold?: boolean
   /** Clips sharing a link id are selected / moved / deleted together. */
   link?: string | null
+  /** type 'lyrics': the words of the song ``asset_id`` (song time). */
+  lyrics?: Lyrics | null
 }
 
 /** One timeline with its own settings. */
@@ -423,6 +495,18 @@ export interface StorageInfo {
   free: number
   /** Kept free for renders; uploads can't use it. */
   reserve: number
+}
+
+/** A lyrics search result (LRCLIB). */
+export interface LyricsCandidate {
+  id: number
+  track: string
+  artist: string
+  album: string
+  duration: number
+  synced: boolean
+  instrumental: boolean
+  preview: string
 }
 
 /** A YouTube video found by music search. */

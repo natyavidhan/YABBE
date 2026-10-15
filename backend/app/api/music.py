@@ -106,6 +106,13 @@ def music_download(project_id: str, body: MusicDownload):
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
+        # YouTube Music knows the song and artist; otherwise lyrics search reads the title
+        fields["song_title"] = (meta.get("track") or title)[:300]
+        artist = meta.get("artist") or ", ".join(meta.get("artists") or []) or None
+        channel = meta.get("channel") or ""
+        if not artist and channel.endswith(" - Topic"):  # auto-generated "Artist - Topic" channels
+            artist = channel[: -len(" - Topic")]
+        fields["song_artist"] = artist[:300] if artist else None
         asset = Asset(id=asset_id, filename=dest.name, original_name=_file_name(title),
                       size=dest.stat().st_size, **fields)
 

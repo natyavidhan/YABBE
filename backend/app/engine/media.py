@@ -86,6 +86,12 @@ def analyze(path: Path) -> dict:
             fields.update(kind="video", duration=duration, fps=round(fps, 3))
     else:
         fields.update(kind="audio", duration=duration)
+    if audio is not None:  # song tags, for finding lyrics
+        tags = {k.lower(): str(v) for k, v in {**(fmt.get("tags") or {}), **(audio.get("tags") or {})}.items()}
+        if tags.get("title"):
+            fields["song_title"] = tags["title"][:300]
+        if tags.get("artist") or tags.get("album_artist"):
+            fields["song_artist"] = (tags.get("artist") or tags["album_artist"])[:300]
     return fields
 
 

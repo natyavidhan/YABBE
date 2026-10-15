@@ -56,6 +56,9 @@ class Asset(_Model):
     created_at: float = Field(default_factory=time.time)
     # Made by the editor (e.g. a freeze frame), not uploaded: not listed in the media bin.
     hidden: bool = False
+    # Song title / artist (from YouTube or the file's tags), for finding lyrics.
+    song_title: Optional[str] = Field(None, max_length=300)
+    song_artist: Optional[str] = Field(None, max_length=300)
 
 
 TrackKind = Literal["video", "audio"]
@@ -118,7 +121,88 @@ class TextStyle(_Model):
     line_spacing: float = Field(1.2, ge=0.5, le=4)
 
 
-ClipType = Literal["video", "audio", "image", "text", "sequence", "shape"]
+ClipType = Literal["video", "audio", "image", "text", "sequence", "shape", "lyrics"]
+
+
+# -- lyrics -----------------------------------------------------------------------------
+
+class LyricWord(_Model):
+    text: str = Field(max_length=200)
+    start: float  # song time (s)
+    end: float
+    conf: float = Field(1.0, ge=0, le=1)  # how sure the word timing is (0 = guessed)
+
+
+class LyricLine(_Model):
+    text: str = Field(max_length=2000)
+    start: float
+    end: float
+    words: list[LyricWord] = Field(default_factory=list, max_length=500)
+
+
+LyricsLayout = Literal["line", "stack", "scroll", "words", "page"]
+LyricsWordFx = Literal["fill", "highlight", "reveal", "pop", "fade", "bounce", "glow", "none"]
+LyricsLineFx = Literal["none", "fade", "slide_up", "slide_down", "slide_left", "zoom", "blur", "drop"]
+
+
+class LyricsStyle(_Model):
+    """How lyrics look and move. Everything is optional to change; presets in
+    the editor set many of these at once."""
+
+    preset: str = Field("karaoke", max_length=40)
+    # what's on screen: the current line / current + next lines / a scrolling
+    # list / a few words at a time / the whole verse
+    layout: LyricsLayout = "line"
+    lines_shown: int = Field(2, ge=1, le=8)  # stack, scroll
+    words_shown: int = Field(3, ge=1, le=12)  # words
+    # how a word changes when it's sung, and how lines come and go
+    word_fx: LyricsWordFx = "fill"
+    line_in: LyricsLineFx = "fade"
+    line_out: LyricsLineFx = "fade"
+    transition_ms: int = Field(250, ge=0, le=3000)
+    # font
+    font: str = Field("DejaVu Sans", max_length=200)
+    size: int = Field(72, ge=8, le=600)
+    bold: bool = True
+    italic: bool = False
+    case: Literal["as_is", "upper", "lower", "title"] = "as_is"
+    letter_spacing: float = Field(0, ge=-20, le=100)
+    line_spacing: float = Field(1.25, ge=0.6, le=4)
+    # colours (#rrggbb or #rrggbbaa)
+    color: str = "#ffffff"  # sung / current word
+    upcoming_color: str = "#ffffff80"  # not sung yet
+    past_color: str = "#ffffff"  # already sung
+    other_lines_opacity: float = Field(0.45, ge=0, le=1)  # lines that aren't the current one
+    outline_color: str = "#000000"
+    outline: float = Field(3, ge=0, le=40)
+    shadow_color: str = "#00000099"
+    shadow: float = Field(2, ge=0, le=40)
+    blur: float = Field(0, ge=0, le=20)  # soft edges / glow amount
+    # a box behind each row / each word / only the word being sung
+    box: Literal["none", "line", "words", "active"] = "none"
+    box_color: str = "#000000aa"
+    box_padding: float = Field(12, ge=0, le=100)
+    active_box_color: Optional[str] = None  # box behind the sung word (box "active"); None = ``box_color``
+    # the current word
+    active_scale: float = Field(1.0, ge=0.5, le=3)
+    active_color: Optional[str] = None  # None = ``color``
+    # layout on the canvas (the clip's transform moves / scales / rotates all of it)
+    align: Literal["left", "center", "right"] = "center"
+    anchor: Literal["top", "middle", "bottom"] = "bottom"
+    margin: float = Field(0.08, ge=0, le=0.5)  # from the anchored edge, fraction of the height
+    width: float = Field(0.85, ge=0.1, le=1)  # wrap width, fraction of the canvas width
+    # timing
+    offset_ms: int = Field(0, ge=-10000, le=10000)  # shift all lyrics (+ = later)
+    lead_ms: int = Field(300, ge=0, le=5000)  # show a line this long before it's sung
+    hold_ms: int = Field(600, ge=0, le=10000)  # keep it up this long after (if no next line)
+
+
+class Lyrics(_Model):
+    lines: list[LyricLine] = Field(default_factory=list, max_length=2000)
+    style: LyricsStyle = Field(default_factory=LyricsStyle)
+    source: Optional[str] = Field(None, max_length=500)  # where the lyrics came from (shown in the editor)
+    # vocals isolated before timing (slower, better on dense mixes)
+    isolate: bool = False
 # How a clip's picture combines with what's below it (Photoshop / Premiere names).
 BlendMode = Literal[
     "normal",
@@ -367,6 +451,9 @@ class Clip(_Model):
     stabilize: Optional[Stabilize] = None
     roto: Optional[Roto] = None
     shape: Optional[ShapeStyle] = None
+    # type == "lyrics": the words of the song ``asset_id`` (timed in song time;
+    # the clip maps timeline → song time like an audio clip: in_point + u * speed)
+    lyrics: Optional[Lyrics] = None
     # Effects added from the Effects tab, in the order shown (None = not organised
     # yet: the editor infers them from the clip's settings). The settings each
     # effect uses live in their own fields (crop, speed, chroma_key, roto, ...).
@@ -421,7 +508,7 @@ class Clip(_Model):
 
     @property
     def is_visual(self) -> bool:
-        return self.type in ("video", "image", "text", "sequence", "shape")
+        return self.type in ("video", "image", "text", "sequence", "shape", "lyrics")
 
 
 class Sequence(_Model):

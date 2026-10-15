@@ -62,6 +62,27 @@ videos can be uploaded.
   LAME V0) — the server searches and downloads with
   [yt-dlp](https://github.com/yt-dlp/yt-dlp). Downloads show progress and can
   be cancelled. Only use music you have the rights to.
+  **Lyrics:** turn on *Lyrics* in a song clip's Audio settings (off by default;
+  nothing is downloaded or computed until you do). The lyrics are found on
+  [LRCLIB](https://lrclib.net) from the song's title / artist (YouTube
+  metadata, file tags or the file name) — or pick another match, or paste your
+  own (plain or LRC) — then every word is timed to the recording: a
+  multilingual forced aligner (Meta's MMS, 1130 languages, any script via
+  uroman) listens to the song once and places each line's words inside that
+  line's window, after measuring how far the LRC is shifted against this
+  recording. Optionally the vocals are isolated first (slower; better on busy
+  mixes). The words appear on a *lyrics clip* linked to the song, styled any
+  way you like: 12 presets (Karaoke, Highlight, Typewriter, Pop, Bounce, One
+  word, Scroll, Next line, Verse, Neon, Boxed, Subtitle) as starting points,
+  then layout (one line, line + next ones, scrolling list, a few words, whole
+  verse), how the sung word changes (fill, highlight, appear, fade, pop,
+  bounce, glow), how lines come and go (fade, slides, drop, zoom, blur),
+  font, case, spacing, colours with opacity (sung / not yet / already sung /
+  current word), outline, shadow, softness, boxes (per line, per word, or
+  just the sung word), placement and width, plus a timing shift, early show
+  and hold. Edit any line and its words are re-timed in seconds; nudge lines
+  earlier / later. Rendered by libass, so the transform, blend modes and
+  everything else apply to the lyrics like any clip.
 * **Sequences** — a project can hold several timelines, each with its own
   resolution, frame rate and background. One is the *main* sequence (shown on
   the dashboard, exported by default). Manage them in the **Sequences** tab of
@@ -202,7 +223,7 @@ from `backend/` — it serves the built UI from `frontend/dist` on the same port
 | `YABBE_PROXY_HEIGHT` | `540` | Proxy (editing copy) resolution |
 | `YABBE_JOB_WORKERS` | `2` | Parallel background jobs (proxies, exports) |
 | `YABBE_AUTO_PRERENDER` | `1` | `0` turns off automatic draft pre-renders of nested sequences everywhere |
-| `YABBE_MODELS_DIR` | `models/` (`/app/models` in Docker) | Where the roto brush model lives; the Docker image builds it in. Locally: `backend/tools/export_edgetam.py` |
+| `YABBE_MODELS_DIR` | `models/` (`/app/models` in Docker) | Where the AI models live (roto brush, lyrics timing); the Docker image includes them. Locally: `backend/tools/export_edgetam.py`, `backend/tools/get_lyrics_models.py` |
 | `YABBE_ROTO_THREADS` | all cores | CPU threads for the roto brush |
 | `YABBE_STORAGE_LIMIT_MB` | `0` | Cap on the data folder (e.g. `1024` for a 1 GB test server); the dashboard shows usage against it |
 | `YABBE_STORAGE_RESERVE_MB` | `100` | Free space kept for previews/renders; uploads and exports that would use it are refused with a clear message |
@@ -220,3 +241,9 @@ memory, so don't start uvicorn with multiple workers.
 
 The roto brush uses [EdgeTAM](https://github.com/facebookresearch/EdgeTAM) by Meta (Apache License 2.0),
 exported to ONNX at build time; its licence is included next to the model files.
+
+Lyrics timing uses Meta's [MMS-300m forced aligner](https://huggingface.co/MahmoudAshraf/mms-300m-1130-forced-aligner)
+([ONNX build](https://huggingface.co/onnx-community/mms-300m-1130-forced-aligner-ONNX)), licensed
+**CC-BY-NC-4.0: non-commercial use only**, and the Kim_Vocal_2 vocal separation model from
+[Ultimate Vocal Remover](https://github.com/TRvlvr/model_repo). Text is romanised with
+[uroman](https://github.com/isi-nlp/uroman). Lyrics come from [LRCLIB](https://lrclib.net).

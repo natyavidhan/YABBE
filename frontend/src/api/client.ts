@@ -2,6 +2,8 @@ import type {
   Asset,
   ExportRecord,
   Job,
+  LyricLine,
+  LyricsCandidate,
   MusicResult,
   PreviewSession,
   PrerenderQuality,
@@ -109,6 +111,16 @@ export const api = {
     request<Asset>('POST', `${p(id)}/media/freeze`, { asset_id: assetId, t }),
   deleteAsset: (id: string, assetId: string) => request<{ ok: boolean }>('DELETE', `${p(id)}/media/${assetId}`),
   reprocessAsset: (id: string, assetId: string) => request<Asset>('POST', `${p(id)}/media/${assetId}/reprocess`),
+  // lyrics (LRCLIB + word timing on the server)
+  lyricsInfo: () => request<{ available: boolean }>('GET', '/api/lyrics/info'),
+  lyricsSearch: (q: string, duration: number) =>
+    request<LyricsCandidate[]>('GET', `/api/lyrics/search?q=${encodeURIComponent(q)}&duration=${duration}`),
+  lyricsGuess: (id: string, assetId: string) =>
+    request<{ query: string; duration: number }>('GET', `${p(id)}/lyrics/${assetId}/guess`),
+  computeLyrics: (id: string, assetId: string, body: { isolate: boolean; lrclib_id?: number; text?: string }) =>
+    request<Job>('POST', `${p(id)}/lyrics/${assetId}`, body),
+  retimeLyricLine: (id: string, assetId: string, body: { text: string; start: number; end: number }) =>
+    request<LyricLine>('POST', `${p(id)}/lyrics/${assetId}/retime`, body),
   // music search (YouTube, via yt-dlp on the server)
   musicInfo: () => request<{ available: boolean; max_minutes: number }>('GET', '/api/music/info'),
   musicSearch: (q: string, signal?: AbortSignal) =>

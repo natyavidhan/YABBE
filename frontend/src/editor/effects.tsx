@@ -51,7 +51,7 @@ export const EFFECTS: EffectDef[] = [
     category: 'Picture',
     description: 'Trim the edges of the picture.',
     icon: <Crop size={14} />,
-    targets: ['video', 'image', 'sequence', 'text', 'shape'],
+    targets: ['video', 'image', 'sequence', 'text', 'shape', 'lyrics'],
     toggle: {
       get: (c) => c.crop.enabled !== false,
       set: (c, on) => ({ crop: { ...c.crop, enabled: on } }),
@@ -140,7 +140,7 @@ export const EFFECTS: EffectDef[] = [
 export const effectDef = (id: string) => EFFECTS.find((e) => e.id === id)
 
 const KIND_NAMES: Record<ClipType, string> = {
-  video: 'video', image: 'photo', audio: 'audio', text: 'text', shape: 'shape', sequence: 'nested sequence',
+  video: 'video', image: 'photo', audio: 'audio', text: 'text', shape: 'shape', sequence: 'nested sequence', lyrics: 'lyrics',
 }
 export const kindName = (t: ClipType) => KIND_NAMES[t]
 

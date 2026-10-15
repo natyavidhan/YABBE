@@ -26,6 +26,11 @@ RUN mkdir -p /models/edgetam && cd /edgetam \
  && python /export_edgetam.py /models/edgetam \
  && cp LICENSE /models/edgetam/LICENSE
 
+# ---- lyrics: word-timing + vocal separation models (pinned, checksummed) ---------------
+FROM python:3.12-slim AS lyrics-models
+COPY backend/tools/get_lyrics_models.py /get_lyrics_models.py
+RUN python /get_lyrics_models.py /models/lyrics
+
 # ---- runtime: FastAPI + FFmpeg ------------------------------------------------------
 FROM python:3.12-slim
 
@@ -53,6 +58,7 @@ RUN --mount=from=ghcr.io/astral-sh/uv:0.12,source=/uv,target=/usr/local/bin/uv \
 COPY backend/app ./app
 COPY --from=ui /ui/dist /app/frontend/dist
 COPY --from=models /models /app/models
+COPY --from=lyrics-models /models/lyrics /app/models/lyrics
 COPY docker/entrypoint.sh /usr/local/bin/yabbe-entrypoint
 RUN chmod +x /usr/local/bin/yabbe-entrypoint && mkdir -p /data && chown yabbe:yabbe /data
 
