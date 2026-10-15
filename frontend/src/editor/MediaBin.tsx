@@ -1,5 +1,6 @@
+import { MusicSearch } from './MusicSearch'
 import { AddShapeButton } from './Shapes'
-import { AlertTriangle, Film, Image as ImageIcon, Music, Plus, RotateCw, Trash2, Type, Upload } from 'lucide-react'
+import { AlertTriangle, Film, Image as ImageIcon, Music, Plus, RotateCw, Trash2, Type, Upload, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { Asset } from '../api/types'
@@ -104,13 +105,26 @@ export function MediaBin({ projectId, onAdded }: { projectId: string; onAdded?: 
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
+        {filter === 'audio' && <MusicSearch projectId={projectId} />}
         {uploads.map((u) => (
           <div key={u.id} className="mb-2 rounded-lg border border-line bg-panel-2 p-2.5">
             <div className="flex items-center gap-2 text-xs">
               <Spinner size={12} />
-              <span className="flex-1 truncate">{u.name}</span>
+              <span className="flex-1 truncate" title={u.name}>{u.name}</span>
               <span className="tabular text-muted">{Math.round(u.progress * 100)}%</span>
+              {u.jobId && (
+                <button
+                  type="button"
+                  onClick={() => api.cancelJob(u.jobId!).catch(() => {})}
+                  className="text-faint hover:text-fg"
+                  aria-label={`Cancel ${u.name}`}
+                  title="Cancel"
+                >
+                  <X size={12} />
+                </button>
+              )}
             </div>
+            {u.message && <div className="mt-1 text-[10px] text-faint">{u.message}</div>}
             <ProgressBar value={u.progress} className="mt-2" />
           </div>
         ))}

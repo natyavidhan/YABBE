@@ -425,6 +425,15 @@ export interface StorageInfo {
   reserve: number
 }
 
+/** A YouTube video found by music search. */
+export interface MusicResult {
+  id: string
+  title: string
+  channel: string
+  duration: number
+  thumbnail: string
+}
+
 export interface Job {
   id: string
   kind: string

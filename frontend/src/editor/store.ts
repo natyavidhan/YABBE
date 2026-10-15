@@ -98,6 +98,9 @@ export interface Upload {
   id: string
   name: string
   progress: number
+  /** Server job doing it (music downloads), so it can be cancelled. */
+  jobId?: string
+  message?: string
 }
 
 const HISTORY_LIMIT = 200

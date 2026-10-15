@@ -57,6 +57,11 @@ videos can be uploaded.
   on any YABBE server.
 * **Media** — drag-and-drop upload of video, audio and photos. The server
   probes each file and builds a fast-seeking proxy, a filmstrip and a waveform.
+  **Music search:** in the media panel's *Audio* tab, search YouTube and add a
+  result's audio to the project as an MP3 (the best audio stream, converted to
+  LAME V0) — the server searches and downloads with
+  [yt-dlp](https://github.com/yt-dlp/yt-dlp). Downloads show progress and can
+  be cancelled. Only use music you have the rights to.
 * **Sequences** — a project can hold several timelines, each with its own
   resolution, frame rate and background. One is the *main* sequence (shown on
   the dashboard, exported by default). Manage them in the **Sequences** tab of
@@ -154,6 +159,8 @@ The keyboard icon in the editor header lists all shortcuts.
 * Python ≥ 3.10 with [uv](https://docs.astral.sh/uv/)
 * Node ≥ 20
 * `ffmpeg` and `ffprobe` on `PATH` (or set `YABBE_FFMPEG` / `YABBE_FFPROBE`)
+* For music search: [Deno](https://deno.com) (or Node) on `PATH` — yt-dlp needs
+  a JavaScript runtime for YouTube
 
 ## Development
 
@@ -199,6 +206,8 @@ from `backend/` — it serves the built UI from `frontend/dist` on the same port
 | `YABBE_ROTO_THREADS` | all cores | CPU threads for the roto brush |
 | `YABBE_STORAGE_LIMIT_MB` | `0` | Cap on the data folder (e.g. `1024` for a 1 GB test server); the dashboard shows usage against it |
 | `YABBE_STORAGE_RESERVE_MB` | `100` | Free space kept for previews/renders; uploads and exports that would use it are refused with a clear message |
+| `YABBE_MUSIC_SEARCH` | `1` | `0` turns off music search (YouTube via yt-dlp) |
+| `YABBE_MUSIC_MAX_MINUTES` | `30` | Longest video whose audio can be added from music search |
 | `YABBE_NESTED_CACHE_MB` | `4096` | Disk budget for live renders of nested sequence ranges |
 | `YABBE_PREVIEW_WORKERS` | `2` | Parallel preview segment renders |
 | `YABBE_STATIC_DIR` | `frontend/dist` | Built UI served by the backend |

@@ -38,6 +38,8 @@ RUN apt-get update \
 
 # Static, multi-arch FFmpeg build (far smaller than Debian's ffmpeg + libs).
 COPY --from=mwader/static-ffmpeg:7.1 /ffmpeg /ffprobe /usr/local/bin/
+# JavaScript runtime yt-dlp needs for YouTube (music search).
+COPY --from=denoland/deno:bin-2.9.7 /deno /usr/local/bin/deno
 
 WORKDIR /app/backend
 ENV UV_PYTHON_DOWNLOADS=never \

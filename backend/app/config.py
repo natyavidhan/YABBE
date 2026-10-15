@@ -56,6 +56,10 @@ STORAGE_RESERVE_MB = int(os.environ.get("YABBE_STORAGE_RESERVE_MB", "100"))
 # e.g. 1024 to hand out a 1 GB test server.
 STORAGE_LIMIT_MB = int(os.environ.get("YABBE_STORAGE_LIMIT_MB", "0"))
 
+# Music search: find songs on YouTube and add their audio (MP3) to a project.
+MUSIC_SEARCH = os.environ.get("YABBE_MUSIC_SEARCH", "1") not in ("0", "false", "no")
+MUSIC_MAX_MINUTES = float(os.environ.get("YABBE_MUSIC_MAX_MINUTES", "30"))
+
 CORS_ORIGINS = [o for o in os.environ.get("YABBE_CORS_ORIGINS", "*").split(",") if o]
 
 

@@ -2,6 +2,7 @@ import type {
   Asset,
   ExportRecord,
   Job,
+  MusicResult,
   PreviewSession,
   PrerenderQuality,
   Project,
@@ -108,6 +109,11 @@ export const api = {
     request<Asset>('POST', `${p(id)}/media/freeze`, { asset_id: assetId, t }),
   deleteAsset: (id: string, assetId: string) => request<{ ok: boolean }>('DELETE', `${p(id)}/media/${assetId}`),
   reprocessAsset: (id: string, assetId: string) => request<Asset>('POST', `${p(id)}/media/${assetId}/reprocess`),
+  // music search (YouTube, via yt-dlp on the server)
+  musicInfo: () => request<{ available: boolean; max_minutes: number }>('GET', '/api/music/info'),
+  musicSearch: (q: string, signal?: AbortSignal) =>
+    request<MusicResult[]>('GET', `/api/music/search?q=${encodeURIComponent(q)}`, undefined, signal),
+  addMusic: (id: string, videoId: string) => request<Job>('POST', `${p(id)}/media/youtube`, { video_id: videoId }),
   posterUrl: (id: string, assetId: string) => `${p(id)}/media/${assetId}/poster`,
   filmstripUrl: (id: string, assetId: string) => `${p(id)}/media/${assetId}/filmstrip`,
   waveformUrl: (id: string, assetId: string) => `${p(id)}/media/${assetId}/waveform`,
@@ -149,6 +155,7 @@ export const api = {
   // jobs
   listJobs: (projectId?: string) =>
     request<Job[]>('GET', `/api/jobs${projectId ? `?project_id=${encodeURIComponent(projectId)}` : ''}`),
+  getJob: (jobId: string) => request<Job>('GET', `/api/jobs/${jobId}`),
   cancelJob: (jobId: string) => request<{ ok: boolean }>('POST', `/api/jobs/${jobId}/cancel`),
 
   // roto brush
