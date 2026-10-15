@@ -175,6 +175,17 @@ videos can be uploaded.
 
 The keyboard icon in the editor header lists all shortcuts.
 
+## Edit with AI (MCP)
+
+[**YABBE MCP**](https://github.com/natyavidhan/yabbe-mcp) exposes every feature of the editor to AI
+agents (Claude, Codex, OpenCode, Cursor, Gemini CLI, ...): give an agent your footage and a brief, and it
+uploads, looks at the shots, listens to the music, builds the edit (cuts, text, transitions, effects,
+lyrics), checks previews and exports it. E.g. for Claude Code:
+
+```sh
+claude mcp add yabbe -e YABBE_URL=http://localhost:8000 -- uvx --from git+https://github.com/natyavidhan/yabbe-mcp yabbe-mcp
+```
+
 ## Requirements (without Docker)
 
 * Python ≥ 3.10 with [uv](https://docs.astral.sh/uv/)
