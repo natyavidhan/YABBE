@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
-import { api } from '../api/client'
+import { api, ApiError } from '../api/client'
+import { takeRemoteAfterConflict } from './liveSync'
 import { toast } from '../components/toast'
 import { textStyleAt } from './keyframes'
 import { runEasyEase } from './graph/actions'
@@ -17,16 +18,25 @@ export function useAutosave(projectId: string) {
     const s = useEditor.getState()
     if (s.version === s.savedVersion || s.projectId !== projectId) return
     const v = s.version
-    const { name, main } = s.doc
-    const sequences = allSequences(s.doc)
     try {
       if (saving.current) await saving.current
-      saving.current = api.saveProject(projectId, { name, sequences, main_sequence_id: main }).then(() => {
-        useEditor.getState().markSaved(v)
-      })
+      // Read the doc after any earlier save finished (its rev is the base).
+      const st = useEditor.getState()
+      if (st.version === st.savedVersion || st.projectId !== projectId) return
+      const v2 = Math.max(v, st.version)
+      const { name, main } = st.doc
+      const sequences = allSequences(st.doc)
+      saving.current = api
+        .saveProject(projectId, { name, sequences, main_sequence_id: main, base_rev: st.rev })
+        .then((p) => {
+          const now = useEditor.getState()
+          now.setSynced(p.rev ?? now.rev, { name, main, sequences })
+          now.markSaved(v2)
+        })
       await saving.current
     } catch (e) {
-      toast.error(`Autosave failed: ${e instanceof Error ? e.message : e}`)
+      if (e instanceof ApiError && e.status === 409) await takeRemoteAfterConflict(projectId).catch(() => {})
+      else toast.error(`Autosave failed: ${e instanceof Error ? e.message : e}`)
     } finally {
       saving.current = null
     }

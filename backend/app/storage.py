@@ -215,12 +215,27 @@ def save(project: Project, touch: bool = True) -> Project:
     return project
 
 
-def update(project_id: str, fn: Callable[[Project], Optional[Project]], touch: bool = True) -> Project:
-    """Read-modify-write under the project lock (used by API and job threads)."""
+def _timeline_sig(p: Project) -> str:
+    return json.dumps([p.name, p.main_sequence_id, [s.model_dump(mode="json") for s in p.sequences]], sort_keys=True)
+
+
+def update(project_id: str, fn: Callable[[Project], Optional[Project]], touch: bool = True,
+           client: Optional[str] = None) -> Project:
+    """Read-modify-write under the project lock (used by API and job threads).
+    Changes to the timeline bump ``rev``; every change is announced to open
+    editors (``client`` = who made it, so they can skip their own)."""
+    from . import live
+
     with lock(project_id):
         project = load(project_id)
+        before, rev0 = _timeline_sig(project), project.rev
         result = fn(project) or project
-        return save(result, touch=touch)
+        timeline = _timeline_sig(result) != before
+        if timeline:
+            result.rev = rev0 + 1
+        saved = save(result, touch=touch)
+    live.publish(project_id, {"rev": saved.rev, "timeline": timeline, "client": client})
+    return saved
 
 
 def delete(project_id: str) -> None:

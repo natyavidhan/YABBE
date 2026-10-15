@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 import tempfile
@@ -12,11 +13,11 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
-from .. import config, storage
+from .. import config, live, storage
 from ..engine import prerender, render
 from ..jobs import jobs
 from ..models import Project, ProjectSummary, Sequence, TimelineUpdate, new_id
@@ -110,13 +111,18 @@ def sanitize_sequence(seq: Sequence, asset_ids: set[str], sequence_ids: Optional
 
 
 @router.put("/{project_id}", response_model=Project)
-def save_project(project_id: str, body: TimelineUpdate):
+def save_project(project_id: str, body: TimelineUpdate, request: Request):
+    """``X-Yabbe-Client`` names who's saving (announced with the change);
+    ``base_rev`` makes the save conditional on nobody else having changed it."""
     get_project(project_id)
+    client = (request.headers.get("x-yabbe-client") or "")[:80] or None
     changed_timeline = any(
         v is not None for v in (body.sequences, body.main_sequence_id, body.clips, body.tracks, body.settings)
     )
 
     def apply(p: Project):
+        if body.base_rev is not None and changed_timeline and p.rev != body.base_rev:
+            raise HTTPException(409, f"The project was changed elsewhere (now at revision {p.rev}); reload it")
         asset_ids = {a.id for a in p.assets}
         if body.name is not None:
             p.name = body.name.strip() or p.name
@@ -144,12 +150,42 @@ def save_project(project_id: str, body: TimelineUpdate):
             raise HTTPException(400, f"“{loop}” would end up inside itself")
         return p
 
-    project = storage.update(project_id, apply)
+    project = storage.update(project_id, apply, client=client)
     if changed_timeline or body.auto_prerender:
         prerender.project_saved(project)
     if changed_timeline:
         refresh_thumbnail(project_id)
     return project
+
+
+@router.get("/{project_id}/events")
+async def events(project_id: str, request: Request):
+    """Server-Sent Events: ``hello`` with the current revision, then a ``change``
+    ({rev, timeline, client}) whenever the project is saved. Each stream ends
+    after a while (the browser reconnects at once and re-syncs from ``hello``),
+    so a server restart never waits on open streams."""
+    get_project(project_id)
+    q = live.subscribe(project_id)
+
+    async def stream():
+        try:
+            yield "retry: 1000\n\n"
+            yield live.sse({"rev": storage.load(project_id).rev}, "hello")
+            deadline = time.monotonic() + 25
+            while time.monotonic() < deadline:
+                if await request.is_disconnected():
+                    break
+                try:
+                    ev = await asyncio.wait_for(q.get(), timeout=5)
+                except asyncio.TimeoutError:
+                    yield ": ping\n\n"
+                    continue
+                yield live.sse(ev, "change")
+        finally:
+            live.unsubscribe(project_id, q)
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.delete("/{project_id}")

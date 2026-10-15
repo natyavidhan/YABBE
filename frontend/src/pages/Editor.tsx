@@ -1,4 +1,4 @@
-import { ArrowLeft, ChartSpline, Check, Download, Film, Keyboard, Redo2, Settings2, SlidersHorizontal, Type, Undo2, X } from 'lucide-react'
+import { Sparkles, ArrowLeft, ChartSpline, Check, Download, Film, Keyboard, Redo2, Settings2, SlidersHorizontal, Type, Undo2, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
@@ -8,6 +8,7 @@ import { Button, IconButton, Modal, Spinner } from '../components/ui'
 import { useIsMobile, useMediaQuery } from '../lib/useMedia'
 import { ExportDialog } from '../editor/ExportDialog'
 import { useAssetPolling, useAutosave, useShortcuts, useTextMeasurements } from '../editor/hooks'
+import { useLiveSync, useRemoteActivity } from '../editor/liveSync'
 import { Inspector } from '../editor/Inspector'
 import { MediaBin } from '../editor/MediaBin'
 import { ProjectSettingsDialog } from '../editor/ProjectSettings'
@@ -71,6 +72,7 @@ export default function Editor() {
 
 function EditorShell({ projectId }: { projectId: string }) {
   const flush = useAutosave(projectId)
+  useLiveSync(projectId)
   useAssetPolling(projectId)
   useTextMeasurements()
   useShortcuts()
@@ -474,6 +476,13 @@ function ProjectName({ className = 'w-56' }: { className?: string }) {
 
 function SaveIndicator({ compact = false }: { compact?: boolean }) {
   const dirty = useEditor((s) => s.version !== s.savedVersion)
+  const remote = useRemoteActivity((s) => s.by)
+  if (remote)
+    return (
+      <span className="flex items-center gap-1 text-xs text-accent-2" aria-live="polite" title="Changes made elsewhere appear here live">
+        <Sparkles size={12} className="animate-pulse" /> {compact ? '' : remote === 'ai' ? 'AI editing…' : 'Updated elsewhere'}
+      </span>
+    )
   if (compact)
     return (
       <span className="px-1 text-faint" aria-live="polite" title={dirty ? 'Saving…' : 'Saved'}>

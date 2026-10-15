@@ -180,7 +180,9 @@ The keyboard icon in the editor header lists all shortcuts.
 [**YABBE MCP**](https://github.com/natyavidhan/yabbe-mcp) exposes every feature of the editor to AI
 agents (Claude, Codex, OpenCode, Cursor, Gemini CLI, ...): give an agent your footage and a brief, and it
 uploads, looks at the shots, listens to the music, builds the edit (cuts, text, transitions, effects,
-lyrics), checks previews and exports it. E.g. for Claude Code:
+lyrics), checks previews and exports it. Keep the project open in the editor to watch it happen: changes
+made elsewhere (an AI agent, another tab) appear live, and edits made at the same moment are merged
+rather than overwritten (Ctrl+Z undoes the AI's last change). E.g. for Claude Code:
 
 ```sh
 claude mcp add yabbe -e YABBE_URL=http://localhost:8000 -- uvx --from git+https://github.com/natyavidhan/yabbe-mcp yabbe-mcp

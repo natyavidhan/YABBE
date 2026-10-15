@@ -3,6 +3,7 @@ import type { AnimProp, Asset, Clip, ClipType, Ease, Keyframe, Marker, Sequence,
 import { api } from '../api/client'
 import { clamp, uid } from '../lib/format'
 import { recalcAuto } from './graph/model'
+import { mergeTimelines, type TimelineState } from './merge'
 import { freezeFrame as freezeClips, freezeTarget } from './freeze'
 import { nestClips, unnestClip } from './nesting'
 import { colorPropAt, shiftMarkers, visibleMarkers, framesOf, isColorProp, keyIndexAt, localTime, propAt, shiftKeyframes, staticColor, staticValue, SHAPE_COLOR, SHAPE_NUMERIC, TEXT_COLOR, TEXT_NUMERIC, upsertKey } from './keyframes'
@@ -144,6 +145,10 @@ interface EditorState {
   gestureStart: Doc | null
   version: number // bumps on every doc change (drives autosave + preview)
   savedVersion: number
+  /** Server revision of the timeline this doc is based on. */
+  rev: number
+  /** The timeline as the server last had it (the base for merging edits made elsewhere). */
+  synced: TimelineState | null
 
   selection: string[]
   playhead: number
@@ -201,6 +206,11 @@ interface EditorState {
   setKeyframes: (clipId: string, prop: AnimProp, frames: Keyframe[]) => void
 
   load: (p: Project) => void
+  /** Take a newer version of the project saved elsewhere (another tab, an AI
+   * agent): one undo step, the view (sequence, playhead, selection) kept. */
+  applyRemote: (p: Project) => void
+  /** A save went through: the server now has ``state`` at ``rev``. */
+  setSynced: (rev: number, state: TimelineState) => void
   setAssets: (assets: Asset[]) => void
   markSaved: (version: number) => void
 
@@ -513,6 +523,8 @@ export const useEditor = create<EditorState>((set, get) => {
     gestureStart: null,
     version: 0,
     savedVersion: 0,
+    rev: 0,
+    synced: null,
     selection: [],
     playhead: 0,
     playing: false,
@@ -814,6 +826,8 @@ export const useEditor = create<EditorState>((set, get) => {
         gestureStart: null,
         version: 0,
         savedVersion: 0,
+        rev: p.rev ?? 0,
+        synced: { name: p.name, main: p.main_sequence_id, sequences: p.sequences },
         selection: [],
         playhead: 0,
         playing: false,
@@ -822,6 +836,42 @@ export const useEditor = create<EditorState>((set, get) => {
         collapsed: loadMap(collapsedKey(p.id)),
         graphSel: [],
       }),
+    applyRemote: (p) => {
+      const s = get()
+      if (s.projectId !== p.id) return
+      const remote: TimelineState = { name: p.name, main: p.main_sequence_id, sequences: p.sequences }
+      // Unsaved edits here: replay them on top of the new version (they get saved next).
+      const dirty = s.version !== s.savedVersion && s.synced !== null
+      const next = dirty ? mergeTimelines(s.synced!, { name: s.doc.name, main: s.doc.main, sequences: allSequences(s.doc) }, remote) : remote
+      const active = next.sequences.find((x) => x.id === s.doc.active) ?? next.sequences.find((x) => x.id === next.main) ?? next.sequences[0]
+      const doc: Doc = {
+        name: next.name,
+        settings: active.settings,
+        tracks: active.tracks,
+        clips: active.clips,
+        active: active.id,
+        main: next.main,
+        sequences: next.sequences,
+      }
+      const ids = new Set(active.clips.map((c) => c.id))
+      const seqIds = new Set(p.sequences.map((x) => x.id))
+      const openTabs = s.openTabs.filter((t) => seqIds.has(t))
+      const version = s.version + 1
+      set({
+        assets: p.assets,
+        doc,
+        past: [...s.past, s.doc].slice(-HISTORY_LIMIT),
+        future: [],
+        version,
+        // clean: it's what the server has; merged: our edits still need saving
+        savedVersion: dirty ? s.savedVersion : version,
+        rev: p.rev ?? s.rev,
+        synced: remote,
+        selection: s.selection.filter((id) => ids.has(id)),
+        openTabs: openTabs.includes(active.id) ? openTabs : [...openTabs, active.id],
+      })
+    },
+    setSynced: (rev, synced) => set({ rev, synced }),
     setAssets: (assets) => set({ assets }),
     markSaved: (version) => set({ savedVersion: Math.max(get().savedVersion, version) }),
 

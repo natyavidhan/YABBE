@@ -79,4 +79,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
 # tini reaps the ffmpeg child processes and forwards signals for clean shutdown.
 ENTRYPOINT ["tini", "--", "yabbe-entrypoint"]
 # A single process on purpose: background jobs live in memory.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "30", "--proxy-headers", "--forwarded-allow-ips", "*"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "30", "--timeout-graceful-shutdown", "5", "--proxy-headers", "--forwarded-allow-ips", "*"]

@@ -536,6 +536,10 @@ class Project(_Model):
     sequences: list[Sequence] = Field(default_factory=list)
     main_sequence_id: str = ""
     auto_prerender: bool = True  # draft pre-renders of nested sequences after edits
+    # Bumped on every change to the timeline (sequences / main / name): saves can
+    # say which revision they were made from, so two editors (or an editor and
+    # an AI agent) never silently overwrite each other.
+    rev: int = 0
 
     @model_validator(mode="before")
     @classmethod
@@ -648,6 +652,9 @@ class TimelineUpdate(_Model):
 
     name: Optional[str] = None
     auto_prerender: Optional[bool] = None
+    # The revision this edit was made from: refused (409) if the project has
+    # changed since, so the caller can reload instead of overwriting.
+    base_rev: Optional[int] = None
     sequences: Optional[list[Sequence]] = None
     main_sequence_id: Optional[str] = None
     # A single timeline's contents (older clients, and unsaved editor state

@@ -444,6 +444,8 @@ export interface Project {
   main_sequence_id: string
   /** Make draft pre-renders of nested sequences in the background after edits. */
   auto_prerender?: boolean
+  /** Timeline revision: bumped by every save (here, another tab or an AI agent). */
+  rev?: number
 }
 
 export interface ProjectSummary {
@@ -460,6 +462,8 @@ export interface ProjectSummary {
 
 export interface Timeline {
   name?: string
+  /** Only save if the project is still at this revision (else 409). */
+  base_rev?: number
   sequences?: Sequence[]
   main_sequence_id?: string
   /** For a single timeline's contents: which sequence they belong to. */

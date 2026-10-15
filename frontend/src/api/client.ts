@@ -44,10 +44,13 @@ async function errorFrom(res: Response): Promise<ApiError> {
   return new ApiError(res.status, message)
 }
 
+/** This tab, so the server can tell editors (and AI agents) apart in its change stream. */
+export const CLIENT_ID = `editor-${Math.random().toString(36).slice(2, 10)}`
+
 async function request<T>(method: string, url: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(url, {
     method,
-    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    headers: { 'X-Yabbe-Client': CLIENT_ID, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal,
   })
