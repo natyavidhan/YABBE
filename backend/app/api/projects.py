@@ -161,7 +161,8 @@ def save_project(project_id: str, body: TimelineUpdate, request: Request):
 @router.get("/{project_id}/events")
 async def events(project_id: str, request: Request):
     """Server-Sent Events: ``hello`` with the current revision, then a ``change``
-    ({rev, timeline, client}) whenever the project is saved. Each stream ends
+    ({rev, timeline, client}) whenever the project is saved, and a ``ping`` every
+    5 s while nothing happens. Each stream ends
     after a while (the browser reconnects at once and re-syncs from ``hello``),
     so a server restart never waits on open streams."""
     get_project(project_id)
@@ -178,7 +179,7 @@ async def events(project_id: str, request: Request):
                 try:
                     ev = await asyncio.wait_for(q.get(), timeout=5)
                 except asyncio.TimeoutError:
-                    yield ": ping\n\n"
+                    yield live.sse({}, "ping")  # lets the editor tell a live stream from a stalled one
                     continue
                 yield live.sse(ev, "change")
         finally:

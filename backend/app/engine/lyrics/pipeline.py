@@ -52,7 +52,7 @@ def available() -> bool:
 
 # -- finding lyrics --------------------------------------------------------------------------
 
-def _get(path: str, params: dict, tries: int = 3) -> object:
+def _get(path: str, params: dict, tries: int = 5) -> object:
     url = f"{LRCLIB}/{path}?{urllib.parse.urlencode({k: v for k, v in params.items() if v not in (None, '')})}"
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     for attempt in range(tries):

@@ -464,6 +464,20 @@ export function findFreeStart(clips: Clip[], trackId: string, wanted: number, du
   return start
 }
 
+/** The track for a new overlay (text, shape) at [start, start + duration): the lowest video track
+ * that is free then and above everything showing then (the top one if nothing is), or a new track on top. */
+export function overlayTrack(doc: Doc, start: number, duration: number): { tracks: Track[]; track: Track } {
+  const busy = (t: Track) => doc.clips.some((c) => c.track_id === t.id && c.start < start + duration - 1e-6 && clipEnd(c) > start + 1e-6)
+  const video = doc.tracks.filter((t) => t.kind === 'video')
+  const firstBusy = video.findIndex(busy)
+  const above = (firstBusy < 0 ? video : video.slice(0, firstBusy)).filter((t) => !t.locked)
+  const free = firstBusy < 0 ? above[0] : above[above.length - 1]
+  if (free) return { tracks: doc.tracks, track: free }
+  const n = doc.tracks.filter((t) => t.kind === 'video').length + 1
+  const track: Track = { id: uid('t_'), kind: 'video', name: `Video ${n}`, muted: false, hidden: false, locked: false }
+  return { tracks: [track, ...doc.tracks], track }
+}
+
 export function makeClip(partial: Partial<Clip> & Pick<Clip, 'track_id' | 'type'>): Clip {
   return {
     id: uid('c_'),
@@ -670,7 +684,7 @@ export const useEditor = create<EditorState>((set, get) => {
       const start = findFreeStart(doc.clips, track.id, opts.start ?? playhead, duration)
       const clip = makeClip({ track_id: track.id, type: 'sequence', sequence_id: sequenceId, start, duration })
       change((d) => ({ ...d, tracks, clips: [...d.clips, clip] }))
-      set({ selection: [clip.id] })
+      set({ selection: [clip.id], transSel: null })
       return null
     },
 
@@ -739,7 +753,7 @@ export const useEditor = create<EditorState>((set, get) => {
         updated.set(c.id, { ...c, link, audio_detached: true, volume: 1, muted: false, fade_in: 0, fade_out: 0, keyframes: otherKeys })
       }
       change((d) => ({ ...d, tracks, clips: [...d.clips.map((c) => updated.get(c.id) ?? c), ...added] }))
-      set({ selection: [...targets.map((c) => c.id), ...added.map((c) => c.id)] })
+      set({ selection: [...targets.map((c) => c.id), ...added.map((c) => c.id)], transSel: null })
       return null
     },
     restoreAudio: (clipId) => {
@@ -769,7 +783,7 @@ export const useEditor = create<EditorState>((set, get) => {
       // Drop the link if nothing else is left in the group.
       if (back.link && !rest.some((c) => c.link === back.link)) back.link = null
       change((d) => ({ ...d, clips: [...rest, back] }))
-      set({ selection: [clip.id] })
+      set({ selection: [clip.id], transSel: null })
     },
 
     selectTransition: (clipId) => set(clipId ? { transSel: clipId, selection: [], graphSel: [] } : { transSel: null }),
@@ -1107,34 +1121,24 @@ export const useEditor = create<EditorState>((set, get) => {
       const start = findFreeStart(doc.clips, track.id, opts.start ?? playhead, duration)
       const clip = makeClip({ track_id: track.id, type, asset_id: asset.id, start, duration })
       change((d) => ({ ...d, tracks, clips: [...d.clips, clip] }))
-      set({ selection: [clip.id] })
+      set({ selection: [clip.id], transSel: null })
       return clip.id
     },
 
     addTextClip: () => {
       const { doc, playhead } = get()
-      let tracks = doc.tracks
-      let track = doc.tracks.find((t) => t.kind === 'video' && !t.locked)
-      if (!track) {
-        track = { id: uid('t_'), kind: 'video', name: 'Text', muted: false, hidden: false, locked: false }
-        tracks = [track, ...tracks]
-      }
-      const start = findFreeStart(doc.clips, track.id, playhead, DEFAULT_TEXT_DURATION)
+      const start = playhead
+      const { tracks, track } = overlayTrack(doc, start, DEFAULT_TEXT_DURATION)
       const clip = makeClip({ track_id: track.id, type: 'text', start, duration: DEFAULT_TEXT_DURATION, text: { ...DEFAULT_TEXT } })
       change((d) => ({ ...d, tracks, clips: [...d.clips, clip] }))
-      set({ selection: [clip.id] })
+      set({ selection: [clip.id], transSel: null })
       return clip.id
     },
 
     addShapeClip: (kind) => {
       const { doc, playhead } = get()
-      let tracks = doc.tracks
-      let track = doc.tracks.find((t) => t.kind === 'video' && !t.locked)
-      if (!track) {
-        track = { id: uid('t_'), kind: 'video', name: 'Shapes', muted: false, hidden: false, locked: false }
-        tracks = [track, ...tracks]
-      }
-      const start = findFreeStart(doc.clips, track.id, playhead, DEFAULT_TEXT_DURATION)
+      const start = playhead
+      const { tracks, track } = overlayTrack(doc, start, DEFAULT_TEXT_DURATION)
       const size = Math.round(Math.min(doc.settings.width, doc.settings.height) / 3)
       const line = kind === 'line' || kind === 'arrow'
       const shape: ShapeStyle = {
@@ -1149,7 +1153,7 @@ export const useEditor = create<EditorState>((set, get) => {
       }
       const clip = makeClip({ track_id: track.id, type: 'shape', start, duration: DEFAULT_TEXT_DURATION, shape })
       change((d) => ({ ...d, tracks, clips: [...d.clips, clip] }))
-      set({ selection: [clip.id] })
+      set({ selection: [clip.id], transSel: null })
       return clip.id
     },
 

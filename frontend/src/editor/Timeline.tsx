@@ -99,6 +99,9 @@ export function Timeline({ projectId }: { projectId: string }) {
   headerRef.current = headerW
 
   const assetMap = useMemo(() => new Map<string, Asset>(assetsWithSequences(assets, doc).map((a) => [a.id, a])), [assets, doc])
+  // Read by the drag handlers, which must stay the same for a whole drag (they're window listeners)
+  const assetMapRef = useRef(assetMap)
+  assetMapRef.current = assetMap
   const contentSeconds = Math.max(duration + 30, (view.width - headerW) / zoom)
   const contentWidth = contentSeconds * zoom
 
@@ -279,7 +282,7 @@ export function Timeline({ projectId }: { projectId: string }) {
         if (valid) s.change((doc) => ({ ...doc, clips: next }))
       } else {
         const o = d.original
-        const asset = assetMap.get(assetKey(o) ?? '')
+        const asset = assetMapRef.current.get(assetKey(o) ?? '')
         const others = clipsNow.filter((c) => c.track_id === o.track_id && c.id !== o.id)
         const hasSource = (o.type === 'video' && !o.hold) || o.type === 'audio' || o.type === 'sequence'
         if (d.kind === 'trim-start') {
@@ -310,7 +313,7 @@ export function Timeline({ projectId }: { projectId: string }) {
         }
       }
     },
-    [assetMap, snap, snapTargets, trackAt],
+    [snap, snapTargets, trackAt],
   )
 
   const onUp = useCallback(() => {

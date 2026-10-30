@@ -65,16 +65,48 @@ export function useLiveSync(projectId: string) {
       }
     }
 
-    const es = new EventSource(`/api/projects/${encodeURIComponent(projectId)}/events`)
-    es.addEventListener('hello', (e) => {
-      // (Re)connected: catch up on anything missed while disconnected.
-      const d = JSON.parse((e as MessageEvent).data) as Change
-      if (d.rev !== useEditor.getState().rev) void sync({ ...d, timeline: true, client: null })
-    })
-    es.addEventListener('change', (e) => void sync(JSON.parse((e as MessageEvent).data) as Change))
+    let es: EventSource | null = null
+    let retry: number | undefined
+    let delay = 1000
+    let heard = Date.now()
+    const connect = () => {
+      heard = Date.now()
+      es = new EventSource(`/api/projects/${encodeURIComponent(projectId)}/events`)
+      es.addEventListener('hello', (e) => {
+        // (Re)connected: catch up on anything missed while disconnected.
+        heard = Date.now()
+        delay = 1000
+        const d = JSON.parse((e as MessageEvent).data) as Change
+        if (d.rev !== useEditor.getState().rev) void sync({ ...d, timeline: true, client: null })
+      })
+      es.addEventListener('change', (e) => {
+        heard = Date.now()
+        void sync(JSON.parse((e as MessageEvent).data) as Change)
+      })
+      es.addEventListener('ping', () => (heard = Date.now()))
+      es.addEventListener('error', () => {
+        // The browser reconnects by itself, except when the server answered with an error
+        // (e.g. a proxy while YABBE restarts): then the stream is closed for good, so open a new one.
+        if (stopped || es?.readyState !== EventSource.CLOSED) return
+        window.clearTimeout(retry)
+        retry = window.setTimeout(connect, delay)
+        delay = Math.min(delay * 2, 15000)
+      })
+    }
+    connect()
+    // The server pings every 5 s. Silence means a stalled stream (a proxy can keep it open after
+    // YABBE restarts, and the browser never notices): start a new one.
+    const watchdog = window.setInterval(() => {
+      if (Date.now() - heard < 15000) return
+      es?.close()
+      window.clearTimeout(retry)
+      connect()
+    }, 5000)
     return () => {
       stopped = true
-      es.close()
+      window.clearTimeout(retry)
+      window.clearInterval(watchdog)
+      es?.close()
     }
   }, [projectId])
 }

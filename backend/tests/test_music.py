@@ -89,3 +89,16 @@ def test_real_youtube(client):
     assert job["status"] == "done", job
     asset = _wait_ready(client, pid)["assets"][0]
     assert asset["kind"] == "audio" and asset["filename"].endswith(".mp3")
+
+
+def test_song_and_artist_from_video_titles():
+    from app.engine.youtube import song_of
+    assert song_of({"title": "Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)",
+                    "channel": "Rick Astley"}) == ("Never Gonna Give You Up", "Rick Astley")
+    assert song_of({"title": "Daft Punk - One More Time (Official Video)", "channel": "DaftPunkVEVO"}) == \
+        ("One More Time", "Daft Punk")
+    assert song_of({"title": "Blinding Lights", "channel": "The Weeknd - Topic"}) == ("Blinding Lights", "The Weeknd")
+    assert song_of({"title": "x", "track": "Kesariya", "artist": "Arijit Singh"}) == ("Kesariya", "Arijit Singh")
+    # someone else's upload: the title stays as it is, artist unknown
+    assert song_of({"title": "Rick Astley - Never Gonna Give You Up [Lyrics]", "channel": "Lyric Vibes"}) == \
+        ("Rick Astley - Never Gonna Give You Up", None)

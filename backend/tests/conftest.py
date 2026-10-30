@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -13,6 +15,17 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(__file__))
+
+# Before any test module imports app.config, so nothing ever lands in the real data dir.
+_DATA = tempfile.mkdtemp(prefix="yabbe-tests-")
+os.environ["YABBE_DATA_DIR"] = os.path.join(_DATA, "data")
+os.environ["YABBE_STATIC_DIR"] = os.path.join(_DATA, "nostatic")
+os.environ["YABBE_AUTO_PRERENDER"] = "0"  # tests that want it turn it on
+
+
+def pytest_sessionfinish(session, exitstatus):
+    shutil.rmtree(_DATA, ignore_errors=True)
+
 
 @pytest.fixture(scope="session")
 def media_dir(tmp_path_factory) -> Path:
@@ -27,11 +40,7 @@ def media_dir(tmp_path_factory) -> Path:
 
 
 @pytest.fixture(scope="session")
-def client(tmp_path_factory, media_dir):
-    import os
-    os.environ["YABBE_DATA_DIR"] = str(tmp_path_factory.mktemp("data"))
-    os.environ["YABBE_STATIC_DIR"] = str(tmp_path_factory.mktemp("nostatic") / "none")
-    os.environ["YABBE_AUTO_PRERENDER"] = "0"  # tests that want it turn it on
+def client(media_dir):
     from app.main import app
     with TestClient(app) as c:
         yield c

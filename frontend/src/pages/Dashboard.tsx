@@ -33,12 +33,20 @@ export default function Dashboard() {
     refresh()
   }, [refresh])
 
+  // A new project's thumbnail is made in the background: look again in a moment.
+  const timers = useRef<number[]>([])
+  const refreshSoon = useCallback(() => {
+    refresh()
+    timers.current.push(window.setTimeout(refresh, 4000), window.setTimeout(refresh, 12000))
+  }, [refresh])
+  useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), [])
+
   const onImport = async (file: File) => {
     setImporting(0)
     try {
       const project = await api.importPackage(file, setImporting)
       toast.success(`Imported “${project.name}”`)
-      refresh()
+      refreshSoon()
     } catch (e) {
       toast.error(e)
     } finally {
@@ -96,7 +104,7 @@ export default function Dashboard() {
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-4 sm:gap-5">
             {projects.map((p) => (
-              <ProjectCard key={p.id} project={p} bust={bust} onChanged={refresh} onOpen={() => navigate(`/p/${p.id}`)} />
+              <ProjectCard key={`${p.id}:${p.has_thumbnail}`} project={p} bust={bust} onChanged={refreshSoon} onOpen={() => navigate(`/p/${p.id}`)} />
             ))}
           </div>
         )}

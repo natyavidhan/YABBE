@@ -116,6 +116,30 @@ def download_mp3(
     return mp3
 
 
+_TITLE_JUNK = re.compile(
+    r"\s*[\(\[][^)\]]*(?:official|video|audio|lyric|visuali[sz]er|\bhd\b|4k|\bmv\b|m/v|remaster)[^)\]]*[\)\]]", re.I)
+
+
+def song_of(meta: dict) -> tuple[str, Optional[str]]:
+    """(song title, artist) of a video, as far as its metadata tells: YouTube Music's own
+    fields, else an "Artist - Title (Official Video)" title posted by that artist's channel."""
+    title = (meta.get("title") or "").strip()
+    artist = meta.get("artist") or ", ".join(meta.get("artists") or []) or None
+    if meta.get("track"):
+        return meta["track"], artist
+    channel = meta.get("channel") or meta.get("uploader") or ""
+    clean = _TITLE_JUNK.sub("", title).strip() or title
+    if not artist and channel.endswith(" - Topic"):  # auto-generated "Artist - Topic" channels
+        return clean, channel[: -len(" - Topic")]
+    if not artist and " - " in clean:
+        left, right = (x.strip() for x in clean.split(" - ", 1))
+        key = lambda x: re.sub(r"[^a-z0-9]", "", x.lower())  # noqa: E731
+        ch = re.sub(r"(vevo|official|music)$", "", key(channel))
+        if ch and key(left) and (key(left) == ch or key(left).startswith(ch) or ch.startswith(key(left))):
+            return right, left
+    return clean, artist
+
+
 def _clean(exc: Exception) -> str:
     msg = re.sub(r"\x1b\[[0-9;]*m", "", str(exc))
     return re.sub(r"^ERROR:\s*(\[[^\]]+\]\s*\S+:\s*)?", "", msg).strip() or "YouTube request failed"
