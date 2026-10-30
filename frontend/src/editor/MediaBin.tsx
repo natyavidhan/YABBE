@@ -142,7 +142,7 @@ export function MediaBin({ projectId, onAdded }: { projectId: string; onAdded?: 
             <span className="text-xs text-muted pointer-coarse:hidden">or click to browse</span>
           </button>
         ) : (
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-2">
             {shown.map((a) => (
               <AssetCard key={a.id} projectId={projectId} asset={a} onAdded={onAdded} />
             ))}

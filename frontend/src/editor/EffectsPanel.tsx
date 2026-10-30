@@ -5,6 +5,7 @@ import { toast } from '../components/toast'
 import { addEffectToClips, cannotAdd, EFFECT_MIME, EFFECTS, type EffectDef, kindName } from './effects'
 import { useInspectorTab } from './inspectorTab'
 import { allSequences, sequenceAsset, useEditor } from './store'
+import { useIsMobile } from '../lib/useMedia'
 
 const CATEGORY_ORDER: EffectDef['category'][] = ['Picture', 'Time', 'Keying & masks', 'Motion', 'Audio']
 const KIND_SHORT: Record<ClipType, string> = {
@@ -14,6 +15,7 @@ const KIND_SHORT: Record<ClipType, string> = {
 /** The Effects tab: browse effects, drag them onto clips (or add to the selection). */
 export function EffectsPanel() {
   const [q, setQ] = useState('')
+  const mobile = useIsMobile()
   const selection = useEditor((s) => s.selection)
   const clips = useEditor((s) => s.doc.clips)
   const doc = useEditor((s) => s.doc)
@@ -54,7 +56,15 @@ export function EffectsPanel() {
           />
         </label>
         <p className="mt-1.5 text-[11px] text-faint">
-          Drag an effect onto a clip on the timeline{selected.length ? ', or add it to the selected clip' + (selected.length > 1 ? 's' : '') : ''}.
+          {mobile ? (
+            selected.length ? (
+              <>Tap Add to put an effect on the selected clip{selected.length > 1 ? 's' : ''}. </>
+            ) : (
+              <>Select a clip on the timeline, then add effects to it here. </>
+            )
+          ) : (
+            <>Drag an effect onto a clip on the timeline{selected.length ? ', or add it to the selected clip' + (selected.length > 1 ? 's' : '') : ''}. </>
+          )}
           Its settings then appear in Properties.
         </p>
       </div>

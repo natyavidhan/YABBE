@@ -337,7 +337,7 @@ function Transport({
         <span className="text-faint">{compact ? '' : '/ '}{formatTimecode(duration, fps)}</span>
       </div>
       <div className="flex flex-1 items-center justify-center gap-0.5">
-        <IconButton label="Go to start (Home)" onClick={() => setPlayhead(0)} className={compact ? 'hidden' : ''}>
+        <IconButton label="Go to start (Home)" onClick={() => setPlayhead(0)} className={compact ? 'hidden!' : ''}>
           <SkipBack size={15} />
         </IconButton>
         <IconButton label="Previous frame (←)" onClick={() => step(-1)}>
@@ -354,7 +354,7 @@ function Transport({
         <IconButton label="Next frame (→)" onClick={() => step(1)}>
           <StepForward size={15} />
         </IconButton>
-        <IconButton label="Go to end (End)" onClick={() => setPlayhead(duration)} className={compact ? 'hidden' : ''}>
+        <IconButton label="Go to end (End)" onClick={() => setPlayhead(duration)} className={compact ? 'hidden!' : ''}>
           <SkipForward size={15} />
         </IconButton>
       </div>
@@ -430,6 +430,14 @@ type Drag =
   | { kind: 'move'; id: string; px: number; py: number; x: number; y: number }
   | { kind: 'scale'; id: string; cx: number; cy: number; dist: number; scale: number }
   | { kind: 'rotate'; id: string; cx: number; cy: number; angle: number; rotation: number }
+  // Two fingers: spread to scale, twist to rotate, both move to move
+  | { kind: 'pinch'; id: string; dist: number; angle: number; mx: number; my: number; scale: number; rotation: number; x: number; y: number }
+
+type Pt = { x: number; y: number }
+const fingers = (m: Map<number, Pt>) => {
+  const [a, b] = [...m.values()]
+  return { dist: Math.hypot(b.x - a.x, b.y - a.y), angle: (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI, mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 }
+}
 
 /** Selection box + handles over the preview (move / scale / rotate). */
 function TransformOverlay({ width }: { width: number }) {
@@ -440,8 +448,11 @@ function TransformOverlay({ width }: { width: number }) {
   const playhead = useEditor((s) => s.playhead)
   const [guides, setGuides] = useState<{ v: boolean; h: boolean }>({ v: false, h: false })
   const coarse = useMediaQuery('(pointer: coarse)')
-  const handle = coarse ? 22 : 10
+  // Fingers get a big grab area around a small dot, so handles don't hide small layers
+  const handle = coarse ? 12 : 10
+  const grab = coarse ? 32 : 10
   const drag = useRef<Drag | null>(null)
+  const touches = useRef(new Map<number, Pt>())
   const ref = useRef<HTMLDivElement>(null)
   const k = width / doc.settings.width
 
@@ -471,7 +482,19 @@ function TransformOverlay({ width }: { width: number }) {
       if (!d) return
       const s = useEditor.getState()
       const p = toProject(e)
-      if (d.kind === 'move') {
+      if (touches.current.has(e.pointerId)) touches.current.set(e.pointerId, p)
+      if (d.kind === 'pinch') {
+        if (touches.current.size < 2) return
+        const f = fingers(touches.current)
+        let rot = d.rotation + f.angle - d.angle
+        rot = ((((rot + 180) % 360) + 360) % 360) - 180
+        s.setProps(d.id, {
+          x: Math.round(d.x + f.mx - d.mx),
+          y: Math.round(d.y + f.my - d.my),
+          scale: Math.round(clamp((d.scale * f.dist) / Math.max(1, d.dist), 0.01, 20) * 1000) / 1000,
+          rotation: Math.round(rot * 10) / 10,
+        })
+      } else if (d.kind === 'move') {
         let x = d.x + (p.x - d.px)
         let y = d.y + (p.y - d.py)
         const snap = 8 / k
@@ -515,10 +538,32 @@ function TransformOverlay({ width }: { width: number }) {
   }
 
   useEffect(() => () => onPointerUp(), [onPointerUp])
+  useEffect(() => {
+    const lift = (e: PointerEvent) => touches.current.delete(e.pointerId)
+    window.addEventListener('pointerup', lift)
+    window.addEventListener('pointercancel', lift)
+    return () => {
+      window.removeEventListener('pointerup', lift)
+      window.removeEventListener('pointercancel', lift)
+    }
+  }, [])
 
   const onStageDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return
     const p = toProject(e)
+    if (e.pointerType === 'touch') {
+      touches.current.set(e.pointerId, p)
+      const target = drag.current?.id ?? (selected.length === 1 ? selected[0].clip.id : null)
+      const l = layers.find((x) => x.clip.id === target)
+      if (touches.current.size === 2 && l) {
+        // Second finger: the layer under the first one (or the selected one) follows both
+        if (drag.current) useEditor.getState().endGesture()
+        startDrag({ kind: 'pinch', id: l.clip.id, ...fingers(touches.current), scale: l.transform.scale, rotation: l.transform.rotation, x: l.transform.x, y: l.transform.y })
+        e.preventDefault()
+        return
+      }
+      if (touches.current.size > 2) return
+    }
     // Prefer the already-selected layer if it's under the pointer, then top-most.
     const hit = selected.find((l) => hitTest(l, p.x, p.y)) ?? layers.find((l) => hitTest(l, p.x, p.y))
     const s = useEditor.getState()
@@ -570,17 +615,23 @@ function TransformOverlay({ width }: { width: number }) {
                       scale: l.transform.scale,
                     })
                   }}
-                  className={`pointer-events-auto absolute border border-accent-2 bg-white ${coarse ? 'rounded-full' : 'rounded-sm'}`}
+                  className="pointer-events-auto absolute flex items-center justify-center"
                   style={{
-                    width: handle,
-                    height: handle,
-                    left: corner.endsWith('w') ? -handle / 2 : undefined,
-                    right: corner.endsWith('e') ? -handle / 2 : undefined,
-                    top: corner.startsWith('n') ? -handle / 2 : undefined,
-                    bottom: corner.startsWith('s') ? -handle / 2 : undefined,
+                    width: grab,
+                    height: grab,
+                    // centred on the corner, but pushed outwards on small layers so the grab areas don't cover them
+                    left: corner.endsWith('w') ? -grab + Math.min(grab / 2, w / 4) : undefined,
+                    right: corner.endsWith('e') ? -grab + Math.min(grab / 2, w / 4) : undefined,
+                    top: corner.startsWith('n') ? -grab + Math.min(grab / 2, h / 4) : undefined,
+                    bottom: corner.startsWith('s') ? -grab + Math.min(grab / 2, h / 4) : undefined,
                     cursor: corner === 'nw' || corner === 'se' ? 'nwse-resize' : 'nesw-resize',
                   }}
-                />
+                >
+                  <div
+                    className={`shrink-0 border border-accent-2 bg-white ${coarse ? 'rounded-full shadow-[0_0_0_1px_rgba(0,0,0,.35)]' : 'rounded-sm'}`}
+                    style={{ width: handle, height: handle }}
+                  />
+                </div>
               ))}
             {selected.length === 1 && (
               <>
@@ -600,9 +651,11 @@ function TransformOverlay({ width }: { width: number }) {
                       rotation: l.transform.rotation,
                     })
                   }}
-                  className="pointer-events-auto absolute left-1/2 -translate-x-1/2 cursor-grab rounded-full border border-accent-2 bg-white"
-                  style={{ top: -handle * 2 - handle / 2, width: handle, height: handle }}
-                />
+                  className="pointer-events-auto absolute left-1/2 flex -translate-x-1/2 cursor-grab items-center justify-center"
+                  style={{ top: -handle * 2 - grab / 2, width: grab, height: grab }}
+                >
+                  <div className="shrink-0 rounded-full border border-accent-2 bg-white" style={{ width: handle, height: handle }} />
+                </div>
               </>
             )}
           </div>

@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger'
 
@@ -67,7 +68,8 @@ export function Modal({
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   }, [onClose])
-  return (
+  // On <body>, so whatever opened it (a sticky track header, a panel) can't draw over it
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-[2px]"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
@@ -87,7 +89,8 @@ export function Modal({
         <div className="px-5 py-4">{children}</div>
         {footer && <div className="flex justify-end gap-2 border-t border-line px-5 py-3">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 

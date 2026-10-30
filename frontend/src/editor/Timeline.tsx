@@ -52,7 +52,7 @@ import { ContextMenu } from '../components/ContextMenu'
 import { useTransitionCatalog } from './transitionCatalog'
 
 const HEADER_W = 176
-const HEADER_W_COMPACT = 104
+const HEADER_W_COMPACT = 84
 const LONG_PRESS_MS = 450
 const RULER_H = 28
 const TRACK_H = { video: 64, audio: 52 } as const
@@ -744,7 +744,8 @@ function TrackHeader({
         <button
           type="button"
           onClick={() => toggleCollapsed(track.id)}
-          className="flex h-5 w-4 shrink-0 items-center justify-center rounded text-faint hover:text-fg"
+          // (phones: no room; the toolbar collapses all tracks)
+          className={`h-5 w-4 shrink-0 items-center justify-center rounded text-faint hover:text-fg ${compact ? 'hidden' : 'flex'}`}
           aria-label={collapsed ? `Expand ${track.name}` : `Collapse ${track.name}`}
           aria-expanded={!collapsed}
           title={collapsed ? 'Expand track' : 'Collapse track'}
@@ -777,7 +778,7 @@ function TrackHeader({
           </span>
         )}
       </div>
-      <div className={`items-center gap-0.5 ${collapsed ? (compact ? 'hidden' : 'flex shrink-0') : 'flex pl-5'} ${collapsed ? '[&_button]:h-5! [&_button]:w-5!' : ''}`}>
+      <div className={`items-center gap-0.5 ${collapsed ? (compact ? 'hidden' : 'flex shrink-0') : compact ? 'flex' : 'flex pl-5'} ${collapsed ? '[&_button]:h-5! [&_button]:w-5!' : ''}`}>
         {track.kind === 'video' ? (
           <IconButton label={track.hidden ? 'Show track' : 'Hide track'} active={track.hidden} onClick={() => updateTrack(track.id, { hidden: !track.hidden })} className="h-6! w-6!">
             {track.hidden ? <EyeOff size={13} /> : <Eye size={13} />}
@@ -854,8 +855,15 @@ function Toolbar({ compact }: { compact: boolean }) {
   const graphOpen = useEditor((s) => s.graphOpen)
   const anyExpanded = useEditor((s) => s.doc.tracks.some((t) => !s.collapsed[t.id]))
   const s = useEditor.getState()
-  return (
-    <div className="flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line px-2">
+  // Phones: bigger buttons in a row that scrolls (never squeezed), everyday actions first
+  const later = compact ? 'order-1' : ''
+  const last = compact ? 'order-2' : ''
+  const bar = (
+    <div
+      className={`flex shrink-0 items-center overflow-x-auto border-b border-line [&>*]:shrink-0 ${
+        compact ? 'h-11 gap-1 pr-6 pl-1.5 [scrollbar-width:none] [&_button]:h-9 [&_button]:min-w-9' : 'h-10 gap-0.5 px-2'
+      }`}
+    >
       <IconButton label="Split at playhead (S)" onClick={s.splitAtPlayhead}>
         <Scissors size={15} />
       </IconButton>
@@ -865,19 +873,19 @@ function Toolbar({ compact }: { compact: boolean }) {
       <IconButton label="Delete (Del)" onClick={s.deleteSelected} disabled={!hasSelection}>
         <Trash2 size={15} />
       </IconButton>
-      <IconButton label="Link selected clips (Ctrl+L)" onClick={() => s.linkSelected()} disabled={!canLink}>
+      <IconButton label="Link selected clips (Ctrl+L)" className={later} onClick={() => s.linkSelected()} disabled={!canLink}>
         <Link2 size={15} />
       </IconButton>
-      <IconButton label="Unlink (Ctrl+Shift+L)" onClick={() => s.unlinkSelected()} disabled={!canUnlink}>
+      <IconButton label="Unlink (Ctrl+Shift+L)" className={later} onClick={() => s.unlinkSelected()} disabled={!canUnlink}>
         <Unlink2 size={15} />
       </IconButton>
       <IconButton label="Freeze frame at the playhead (F)" onClick={freezeAtPlayhead}>
         <Snowflake size={15} />
       </IconButton>
-      <IconButton label="Nest selected clips into a sequence" onClick={nestSelected} disabled={!hasSelection}>
+      <IconButton label="Nest selected clips into a sequence" className={later} onClick={nestSelected} disabled={!hasSelection}>
         <Group size={15} />
       </IconButton>
-      <IconButton label="Un-nest (replace the nested clip with its contents)" onClick={unnestSelected} disabled={!oneNested}>
+      <IconButton label="Un-nest (replace the nested clip with its contents)" className={later} onClick={unnestSelected} disabled={!oneNested}>
         <Ungroup size={15} />
       </IconButton>
       <IconButton
@@ -889,7 +897,7 @@ function Toolbar({ compact }: { compact: boolean }) {
       >
         <Flag size={15} />
       </IconButton>
-      <div className="mx-1 h-5 w-px bg-line" />
+      <div className={`mx-1 h-5 w-px bg-line ${later}`} />
       {!compact && (
         <IconButton label="Add text (T)" onClick={() => s.addTextClip()}>
           <Type size={15} />
@@ -897,26 +905,26 @@ function Toolbar({ compact }: { compact: boolean }) {
       )}
       <button
         onClick={() => s.addTrack('video')}
-        className="flex h-7 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap text-muted hover:bg-raised hover:text-fg"
+        className={`flex h-7 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap text-muted hover:bg-raised hover:text-fg ${later}`}
         title="Add video track"
       >
         <Plus size={13} /> {compact ? 'Video' : 'Video track'}
       </button>
       <button
         onClick={() => s.addTrack('audio')}
-        className="flex h-7 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap text-muted hover:bg-raised hover:text-fg"
+        className={`flex h-7 items-center gap-1 rounded-md px-2 text-xs whitespace-nowrap text-muted hover:bg-raised hover:text-fg ${later}`}
         title="Add audio track"
       >
         <Plus size={13} /> {compact ? 'Audio' : 'Audio track'}
       </button>
-      <div className="flex-1" />
+      <div className={`flex-1 ${later}`} />
       <IconButton
         label={anyExpanded ? 'Collapse all tracks' : 'Expand all tracks'}
         onClick={() => s.setAllCollapsed(anyExpanded)}
       >
         {anyExpanded ? <ChevronsDownUp size={15} /> : <ChevronsUpDown size={15} />}
       </IconButton>
-      <IconButton label="Graph editor (G)" active={graphOpen} onClick={() => s.setGraphOpen(!graphOpen)}>
+      <IconButton label="Graph editor (G)" active={graphOpen} onClick={() => s.setGraphOpen(!graphOpen)} className={compact ? 'hidden!' : ''}>
         <ChartSpline size={15} />
       </IconButton>
       <IconButton
@@ -931,11 +939,12 @@ function Toolbar({ compact }: { compact: boolean }) {
         active={snapMarkers && snapping}
         disabled={!snapping}
         onClick={() => s.setSnapMarkers(!snapMarkers)}
+        className={compact ? 'hidden!' : ''}
       >
         <FlagTriangleRight size={15} />
       </IconButton>
-      <div className="mx-1 h-5 w-px bg-line" />
-      <IconButton label="Zoom out (−)" onClick={() => s.setZoom(zoom / 1.25)}>
+      <div className={`mx-1 h-5 w-px bg-line ${last}`} />
+      <IconButton label="Zoom out (−)" onClick={() => s.setZoom(zoom / 1.25)} className={last}>
         <ZoomOut size={15} />
       </IconButton>
       <input
@@ -948,9 +957,17 @@ function Toolbar({ compact }: { compact: boolean }) {
         className={compact ? 'hidden' : 'w-28'}
         aria-label="Timeline zoom"
       />
-      <IconButton label="Zoom in (+)" onClick={() => s.setZoom(zoom * 1.25)}>
+      <IconButton label="Zoom in (+)" onClick={() => s.setZoom(zoom * 1.25)} className={last}>
         <ZoomIn size={15} />
       </IconButton>
+    </div>
+  )
+  if (!compact) return bar
+  return (
+    <div className="relative shrink-0">
+      {bar}
+      {/* there's more to the right */}
+      <div className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-panel to-transparent" />
     </div>
   )
 }
